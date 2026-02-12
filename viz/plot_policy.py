@@ -44,6 +44,32 @@ def load_policy(path):
     return policy
 
 
+def find_policy_path(reward_path=None):
+    """Find policy.txt in multiple locations with priority:
+    1. Explicit --input argument
+    2. Same folder as reward.csv (if provided)
+    3. Current directory
+    4. policy_plots/ folder
+    """
+    search_paths = ["policy.txt"]
+    
+    if reward_path and os.path.exists(reward_path):
+        map_folder = os.path.dirname(reward_path)
+        if map_folder:
+            search_paths.insert(0, os.path.join(map_folder, "policy.txt"))
+    
+    search_paths.extend([
+        "policy_plots/policy.txt",
+        "viz/policy.txt"
+    ])
+    
+    for path in search_paths:
+        if os.path.exists(path):
+            return path
+    
+    return None
+
+
 def load_reward_csv(path):
     data = []
     with open(path, "r", encoding="utf-8") as fp:
@@ -473,7 +499,7 @@ def plot_all_actions_for_orient(policy, orient, title, save_path=None, show=Fals
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize policy.txt output")
-    parser.add_argument("--input", default="policy.txt", help="Path to policy.txt")
+    parser.add_argument("--input", default=None, help="Path to policy.txt (auto-detected if not provided)")
     parser.add_argument("--orient", type=int, default=0, help="Orientation index")
     parser.add_argument("--action", type=int, default=0, help="Action index")
     parser.add_argument("--out-dir", default="policy_plots", help="Output directory for images")
@@ -495,6 +521,21 @@ def main():
     parser.add_argument("--temperature", type=float, default=1.0, help="Temperature for softmax sampling (higher = more exploration)")
     parser.add_argument("--seed-sim", type=int, default=None, help="Random seed for softmax sampling")
     args = parser.parse_args()
+
+    # Auto-detect policy path if not provided
+    if args.input is None:
+        detected_path = find_policy_path(args.reward)
+        if detected_path:
+            args.input = detected_path
+            print(f"Auto-detected policy from: {args.input}")
+        else:
+            args.input = "policy.txt"
+            if not os.path.exists(args.input):
+                print(f"❌ Policy file not found. Searched in:")
+                print(f"   - {os.path.dirname(args.reward)}/policy.txt")
+                print(f"   - policy.txt")
+                print(f"   - policy_plots/policy.txt")
+                return 1
 
     if args.print_table:
         print_action_table()

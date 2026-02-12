@@ -127,6 +127,25 @@ static int load_reward_csv(const char *path, double reward[H][W]) {
     return 0;
 }
 
+static char* extract_map_folder(const char *reward_path) {
+    // Extract folder path from reward.csv path
+    // e.g., "sim_maps/map_d0.35_s42_sm3_cr2/reward.csv" -> "sim_maps/map_d0.35_s42_sm3_cr2"
+    static char folder[512];
+    strncpy(folder, reward_path, sizeof(folder) - 1);
+    folder[sizeof(folder) - 1] = '\0';
+    
+    // Find and remove the filename part
+    char *last_slash = strrchr(folder, '/');
+    if (!last_slash) {
+        last_slash = strrchr(folder, '\\');
+    }
+    if (last_slash) {
+        *last_slash = '\0';
+    }
+    
+    return folder;
+}
+
 static int write_policy_txt(const char *path, double policy[MAX_ORIENT][MAX_ACTIONS][H][W], int iters_used) {
     FILE *fp = fopen(path, "w");
     if (!fp) {
@@ -441,8 +460,17 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    // Also save policy to map folder
+    char *map_folder = extract_map_folder(reward_path);
+    char policy_in_map[512];
+    snprintf(policy_in_map, sizeof(policy_in_map), "%s/policy.txt", map_folder);
+    if (write_policy_txt(policy_in_map, policy, iters_used) != 0) {
+        fprintf(stderr, "Warning: could not save policy to map folder: %s\n", policy_in_map);
+    }
+
     printf("RLConvNet simple demo. V(goal)=%.6f iters=%d %s tol=%.4g\n",
            V[0][goal_y + 1][goal_x + 1], iters_used, converged ? "(converged)" : "(maxed)", tol);
+    printf("Policy saved to: policy.txt and %s\n", policy_in_map);
 
     return 0;
 }

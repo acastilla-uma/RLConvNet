@@ -22,6 +22,7 @@ def parse_solver_output(output):
     """Parse solver output to extract iteration count and convergence status."""
     iters = None
     converged = False
+    convergence_message = "Desconocido"
     
     # Look for: "RLConvNet simple demo. V(goal)=... iters=500 (converged) tol=0.001"
     match = re.search(r'iters=(\d+)\s+\((converged|maxed)\)', output)
@@ -29,7 +30,17 @@ def parse_solver_output(output):
         iters = int(match.group(1))
         converged = (match.group(2) == 'converged')
     
-    return iters, converged
+    # Extract convergence message
+    if 'Converged at iteration' in output:
+        conv_match = re.search(r'Converged at iteration (\d+) with tol=([0-9.e-]+)', output)
+        if conv_match:
+            convergence_message = f"Convergió en iteración {conv_match.group(1)} (tol={conv_match.group(2)})"
+    elif 'Warning: value iteration hit k-max' in output:
+        warn_match = re.search(r'hit k-max=(\d+) without reaching tol=([0-9.e-]+)', output)
+        if warn_match:
+            convergence_message = f"Alcanzó k-max={warn_match.group(1)} sin llegar a tol={warn_match.group(2)}"
+    
+    return iters, converged, convergence_message
 
 
 def run_train(map_name, tol, k_max, solver_exe="rl_convnet_simple.exe"):
@@ -66,7 +77,7 @@ def run_train(map_name, tol, k_max, solver_exe="rl_convnet_simple.exe"):
             if any(kw in line for kw in ['Policy saved', 'Warning:', 'RLConvNet', 'Converged']):
                 print(f"  {line.strip()}")
         
-        iters, converged = parse_solver_output(output)
+        iters, converged, convergence_msg = parse_solver_output(output)
         
         success = iters is not None  # Consider success if we got iterations
         
@@ -75,6 +86,7 @@ def run_train(map_name, tol, k_max, solver_exe="rl_convnet_simple.exe"):
             'k_max': k_max,
             'iters': iters,
             'converged': converged,
+            'convergence_message': convergence_msg,
             'success': success
         }
     except subprocess.TimeoutExpired:
@@ -84,6 +96,7 @@ def run_train(map_name, tol, k_max, solver_exe="rl_convnet_simple.exe"):
             'k_max': k_max,
             'iters': None,
             'converged': False,
+            'convergence_message': 'Timeout de entrenamiento',
             'success': False
         }
     except Exception as e:
@@ -93,6 +106,7 @@ def run_train(map_name, tol, k_max, solver_exe="rl_convnet_simple.exe"):
             'k_max': k_max,
             'iters': None,
             'converged': False,
+            'convergence_message': f'Error: {str(e)}',
             'success': False
         }
 
@@ -426,9 +440,9 @@ def generate_html_report(map_name, experiments, report_path):
     
     for idx, exp in enumerate(experiments, 1):
         status_class = "converged" if exp.get('converged') else "maxed"
-        status_text = "Convergió" if exp.get('converged') else "Máximo alcanzado"
         iters_text = str(exp['iters']) if exp['iters'] is not None else "N/A"
         reason_text = exp.get('stop_reason_spanish', 'Desconocido')
+        convergence_text = exp.get('convergence_message', 'Desconocido')
         
         html += f"""
             <tr>
@@ -436,7 +450,7 @@ def generate_html_report(map_name, experiments, report_path):
                 <td>{exp['tol']:.1e}</td>
                 <td>{exp['k_max']}</td>
                 <td>{iters_text}</td>
-                <td class="{status_class}">{status_text}</td>
+                <td class="{status_class}">{convergence_text}</td>
                 <td>{reason_text}</td>
             </tr>
 """
@@ -615,6 +629,7 @@ def main():
                 'k_max': k_max,
                 'iters': train_result['iters'],
                 'converged': train_result['converged'],
+                'convergence_message': train_result.get('convergence_message', 'Desconocido'),
                 'success': train_result['success'],
                 'stop_reason': sim_result['stop_reason'],
                 'stop_reason_spanish': sim_result['stop_reason_spanish'],

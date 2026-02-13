@@ -257,7 +257,7 @@ def main():
     # If generating new map
     if args.density is not None or args.seed is not None:
         if args.density is None or args.seed is None:
-            print("❌ Both --density and --seed required for map generation")
+            print("ERROR: Both --density and --seed required for map generation")
             sys.exit(1)
         
         print(f"\n{'='*60}")
@@ -277,7 +277,7 @@ def main():
         )
         
         if not map_path:
-            print("❌ Map generation failed")
+            print("ERROR: Map generation failed")
             sys.exit(1)
         
         # Execute full pipeline on generated map
@@ -285,10 +285,10 @@ def main():
         print(f"Training on generated map")
         print(f"{'='*60}")
         
-        print("🔧 Training policy...")
+        print("[*] Training policy...")
         train_policy(map_path, tol=args.tol, k_max=args.k_max)
         
-        print("\n🎮 Simulating policy...")
+        print("\n[*] Simulating policy...")
         simulate_policy(
             map_path,
             steps=args.steps,
@@ -297,7 +297,7 @@ def main():
             goal_radius=args.goal_radius,
         )
         
-        print(f"\n✅ Pipeline complete!")
+        print(f"\n[+] Pipeline complete!")
         print(f"   Map: {map_path}")
         print(f"   Policy: {os.path.join(map_path, 'policy.txt')}")
         print(f"   Plot: policy_plots/policy_path.png")
@@ -307,12 +307,12 @@ def main():
     if args.all_maps:
         maps = list_available_maps()
         if not maps:
-            print("❌ No maps found in sim_maps/")
+            print("ERROR: No maps found in sim_maps/")
             sys.exit(1)
     elif args.map:
         map_path = os.path.join("sim_maps", args.map) if not args.map.startswith("sim_maps") else args.map
         if not os.path.isdir(map_path):
-            print(f"❌ Map folder not found: {map_path}")
+            print(f"ERROR: Map folder not found: {map_path}")
             sys.exit(1)
         maps = [map_path]
     else:
@@ -330,7 +330,7 @@ def main():
                 print(f"    Files: {', '.join(files)}")
             sys.exit(0)
         else:
-            print("❌ Please specify --map, --all-maps, or use --density --seed to generate")
+            print("ERROR: Please specify --map, --all-maps, or use --density --seed to generate")
             sys.exit(1)
 
     # Ensure maps paths are in proper format
@@ -344,11 +344,11 @@ def main():
         print(f"{'='*60}")
 
         if args.action in ("train", "all"):
-            print("🔧 Training policy...")
+            print("[*] Training policy...")
             train_policy(map_path, tol=args.tol, k_max=args.k_max)
 
         if args.action in ("simulate", "all"):
-            print("🎮 Simulating policy...")
+            print("[*] Simulating policy...")
             simulate_policy(
                 map_path,
                 steps=args.steps,

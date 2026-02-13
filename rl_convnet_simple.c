@@ -463,7 +463,11 @@ int main(int argc, char **argv) {
     // Also save policy to map folder
     char *map_folder = extract_map_folder(reward_path);
     char policy_in_map[512];
+#ifdef _WIN32
+    snprintf(policy_in_map, sizeof(policy_in_map), "%s\\policy.txt", map_folder);
+#else
     snprintf(policy_in_map, sizeof(policy_in_map), "%s/policy.txt", map_folder);
+#endif
     if (write_policy_txt(policy_in_map, policy, iters_used) != 0) {
         fprintf(stderr, "Warning: could not save policy to map folder: %s\n", policy_in_map);
     }

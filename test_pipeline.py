@@ -314,7 +314,7 @@ def main():
         if not os.path.isdir(map_path):
             print(f"❌ Map folder not found: {map_path}")
             sys.exit(1)
-        maps = [args.map if args.map.startswith("sim_maps") else f"sim_maps/{args.map}"]
+        maps = [map_path]
     else:
         # List action
         if args.action == "list":
@@ -353,7 +353,8 @@ def main():
                 map_path,
                 steps=args.steps,
                 action_mode=args.action_mode,
-                temperature=args.temperature
+                temperature=args.temperature,
+                goal_radius=args.goal_radius
             )
 
 

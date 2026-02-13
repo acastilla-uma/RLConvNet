@@ -232,7 +232,7 @@ def main():
     obstacles_img_path = os.path.join(map_folder, "obstacles.png")
     visualize_obstacles(obstacles, w, h, sx, sy, gx, gy, obstacles_img_path)
 
-    print(f"✓ Generated map in: {map_folder}")
+    print(f"Generated map in: {map_folder}")
     print(f"  - obstacles.csv (0 free, 1 obstacle)")
     print(f"  - reward.csv (float reward per cell)")
     print(f"  - start_goal.csv (sx,sy,gx,gy)")

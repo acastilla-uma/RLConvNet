@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Test pipeline for training and simulating RL policies on different maps.
-Automates the process: generate map -> train solver -> simulate policy
+Test pipeline for training and simulating RL policies.
+Automates: generate map -> train solver -> simulate policy
 """
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,46 @@ def list_available_maps(maps_dir="sim_maps"):
     return sorted(maps)
 
 
+def generate_map(density, seed, smooth=3, carve=2, width=100, height=100):
+    """Generate a map using map_generator.py."""
+    cmd = [
+        "python", "sim/map_generator.py",
+        "--density", str(density),
+        "--seed", str(seed),
+        "--smooth", str(smooth),
+        "--carve", str(carve),
+        "--width", str(width),
+        "--height", str(height)
+    ]
+    
+    print(f"  Running: {' '.join(cmd[:5])}...")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            print(f"  ❌ Map generation failed")
+            if result.stderr:
+                print(f"  {result.stderr[:200]}")
+            return None
+        
+        output = result.stdout
+        # Extract map folder name from output
+        for line in output.split('\n'):
+            if 'Generated map in:' in line:
+                # Extract folder path
+                parts = line.split()
+                map_path = parts[-1]
+                print(f"  ✓ Generated: {os.path.basename(map_path)}")
+                return map_path
+        
+        return None
+    except subprocess.TimeoutExpired:
+        print(f"  ❌ Map generation timed out")
+        return None
+    except Exception as e:
+        print(f"  ❌ Error generating map: {e}")
+        return None
+
+
 def train_policy(map_folder, solver_exe="rl_convnet_simple.exe", tol=1e-4, k_max=50000):
     """Train policy for a map using the solver."""
     reward_csv = os.path.join(map_folder, "reward.csv")
@@ -29,7 +70,6 @@ def train_policy(map_folder, solver_exe="rl_convnet_simple.exe", tol=1e-4, k_max
         print(f"  ❌ reward.csv not found in {map_folder}")
         return None
     
-    # Check if solver exists
     if not os.path.exists(solver_exe):
         print(f"  ❌ Solver executable not found: {solver_exe}")
         return None
@@ -41,18 +81,16 @@ def train_policy(map_folder, solver_exe="rl_convnet_simple.exe", tol=1e-4, k_max
         "--k-max", str(k_max)
     ]
     
-    print(f"  Running: {' '.join(cmd)}")
+    print(f"  Running solver...")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
-            print(f"  ❌ Solver failed with return code {result.returncode}")
-            if result.stderr:
-                print(f"  stderr: {result.stderr[:200]}")
-            return None
         
-        # Extract convergence info from output
         output = result.stdout + result.stderr
-        print(f"  {output.strip()}")
+        # Extract important lines
+        for line in output.split('\n'):
+            if 'Converged at' in line or 'Warning:' in line or 'saved to' in line:
+                print(f"  {line.strip()}")
+        
         return True
     except subprocess.TimeoutExpired:
         print(f"  ❌ Solver timed out (>300s)")
@@ -79,16 +117,22 @@ def simulate_policy(map_folder, steps=10000, action_mode="argmax", temperature=1
         "--temperature", str(temperature)
     ]
     
-    print(f"  Running: {' '.join(cmd)}")
+    print(f"  Running simulation...")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode != 0:
-            print(f"  ⚠ Simulation returned non-zero code {result.returncode}")
-            if result.stderr:
-                print(f"  stderr: {result.stderr[:200]}")
         
         output = result.stdout + result.stderr
-        print(f"  {output.strip()}")
+        for line in output.split('\n'):
+            if 'Auto-detected' in line or 'Saved' in line or 'reason:' in line:
+                print(f"  {line.strip()}")
+        
+        # Copy policy plot to map folder
+        plot_src = "policy_plots/policy_path.png"
+        plot_dst = os.path.join(map_folder, "policy_path.png")
+        if os.path.exists(plot_src):
+            shutil.copy(plot_src, plot_dst)
+            print(f"  Saved plot to: {plot_dst}")
+        
         return True
     except subprocess.TimeoutExpired:
         print(f"  ⚠ Simulation timed out (>60s)")
@@ -100,8 +144,10 @@ def simulate_policy(map_folder, steps=10000, action_mode="argmax", temperature=1
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Test pipeline: train and simulate policies on maps"
+        description="Full pipeline: generate map -> train solver -> simulate"
     )
+    
+    # Action
     parser.add_argument(
         "--action",
         type=str,
@@ -109,11 +155,39 @@ def main():
         default="list",
         help="Action to perform"
     )
+    
+    # Existing map or generate new
     parser.add_argument(
         "--map",
         type=str,
-        help="Specific map to use (from sim_maps/ folder), e.g., map_d0.35_s42_sm3_cr2"
+        help="Existing map (from sim_maps/), e.g., map_d0.35_s42_sm3_cr2"
     )
+    
+    # Map generation parameters
+    parser.add_argument(
+        "--density",
+        type=float,
+        help="Generate new map with density (0-1)"
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        help="Random seed for map generation"
+    )
+    parser.add_argument(
+        "--smooth",
+        type=int,
+        default=3,
+        help="Smoothing passes for obstacle generation"
+    )
+    parser.add_argument(
+        "--carve",
+        type=int,
+        default=2,
+        help="Carve radius for path generation"
+    )
+    
+    # Solver parameters
     parser.add_argument(
         "--tol",
         type=float,
@@ -126,6 +200,8 @@ def main():
         default=50000,
         help="Maximum iterations for solver"
     )
+    
+    # Simulation parameters
     parser.add_argument(
         "--steps",
         type=int,
@@ -145,14 +221,60 @@ def main():
         default=1.0,
         help="Temperature for softmax action selection"
     )
+    
+    # Batch processing
     parser.add_argument(
         "--all-maps",
         action="store_true",
         help="Run action on all available maps"
     )
+    
     args = parser.parse_args()
 
-    # Determine which maps to process
+    # If generating new map
+    if args.density is not None or args.seed is not None:
+        if args.density is None or args.seed is None:
+            print("❌ Both --density and --seed required for map generation")
+            sys.exit(1)
+        
+        print(f"\n{'='*60}")
+        print(f"Generating map: density={args.density}, seed={args.seed}")
+        print(f"{'='*60}")
+        
+        map_path = generate_map(
+            density=args.density,
+            seed=args.seed,
+            smooth=args.smooth,
+            carve=args.carve
+        )
+        
+        if not map_path:
+            print("❌ Map generation failed")
+            sys.exit(1)
+        
+        # Execute full pipeline on generated map
+        print(f"\n{'='*60}")
+        print(f"Training on generated map")
+        print(f"{'='*60}")
+        
+        print("🔧 Training policy...")
+        train_policy(map_path, tol=args.tol, k_max=args.k_max)
+        
+        print("\n🎮 Simulating policy...")
+        simulate_policy(
+            map_path,
+            steps=args.steps,
+            action_mode=args.action_mode,
+            temperature=args.temperature
+        )
+        
+        print(f"\n✅ Pipeline complete!")
+        print(f"   Map: {map_path}")
+        print(f"   Policy: {os.path.join(map_path, 'policy.txt')}")
+        print(f"   Plot: policy_plots/policy_path.png")
+        return
+
+    # Determine which existing maps to process
     if args.all_maps:
         maps = list_available_maps()
         if not maps:
@@ -179,7 +301,7 @@ def main():
                 print(f"    Files: {', '.join(files)}")
             sys.exit(0)
         else:
-            print("❌ Please specify --map or --all-maps")
+            print("❌ Please specify --map, --all-maps, or use --density --seed to generate")
             sys.exit(1)
 
     # Ensure maps paths are in proper format

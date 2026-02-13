@@ -2,7 +2,7 @@
 
 Un framework de **aprendizaje por refuerzo** que utiliza **kernels convolucionales 3×3** para entrenar políticas en grillas 2D con orientaciones múltiples. El agente aprende a navegar desde un punto de inicio a una meta evitando obstáculos.
 
-**Estado**: ✅ Reestructurado para facilitar pruebas sistemáticas (Feb 2026)
+**Estado**: ✅ Completamente funcional con pipeline automatizado (Feb 2026)
 
 ---
 
@@ -10,46 +10,54 @@ Un framework de **aprendizaje por refuerzo** que utiliza **kernels convolucional
 
 - **Algoritmo**: Iteración de valores con convergencia adaptativa
 - **Espacio de estados**: Grid 100×100 con hasta 8 orientaciones (configurable)
-- **Espacio de acciones**: 6 acciones posibles/orientación (solo 3 permitidas)
-- **Núcleo**: Kernels 3×3 para agregación de valores de vecinos
-- **Generación de mapas**: Procedural con obstáculos y caminos garantizados
+- **Espacio de acciones**: 6 acciones posibles/orientación (3 permitidas por defecto)
+- **Núcleo**: Kernels 3×3 para agregación espacial de valores de vecinos
+- **Generación de mapas**: Procedural con obstáculos suavizados y caminos garantizados
+- **Recompensas inteligentes**: Combina seguridad (distancia a obstáculos) + objetivo (atracción a meta)
 - **Simulación**: Argmax determinista o softmax con temperatura configurable
-- **Reproducibilidad**: Nombres de carpetas incluyen todos los parámetros
+- **Pipeline completo**: Generación + entrenamiento + simulación en un solo comando
+- **Reproducibilidad**: Nombres de carpetas contienen todos los parámetros
 
 ---
 
-## 🚀 Inicio Rápido (5 minutos)
+## 🚀 Inicio Rápido
 
-### Paso 1: Compilar
+### Pipeline Completo en Un Comando
+
 ```bash
+# Compilar solver (solo una vez)
 gcc -O2 rl_convnet_simple.c -o rl_convnet_simple.exe -lm
+
+# Generar mapa + entrenar + simular
+python test_pipeline.py --density 0.4 --seed 42 --start 10,10 --goal 90,90 \
+  --tol 1e-3 --k-max 5000 --action all --goal-radius 1
 ```
 
-### Paso 2: Generar mapa
-```bash
-python sim/map_generator.py --density 0.35 --seed 42
-```
-→ Crea carpeta: `sim_maps/map_d0.35_s42_sm3_cr2/`
+**¿Qué hace esto?**
+1. Genera mapa en `sim_maps/map_d0.4_s42_sm3_cr2/`
+2. Entrena política usando value iteration
+3. Simula trayectoria y guarda `policy_path.png` en carpeta del mapa
 
-### Paso 3: Entrenar
-```bash
-./rl_convnet_simple.exe --reward sim_maps/map_d0.35_s42_sm3_cr2/reward.csv
+**Resultado esperado:**
 ```
-Salida esperada:
-```
-[t=100] max_delta=1.83198
-[t=200] max_delta=1.76438
-Converged at iteration 128 (delta=1.79999)
-RLConvNet simple demo. V(goal)=165.842428 iters=128 (converged) tol=1.8
-```
+============================================================
+Generating map: density=0.4, seed=42, start=10,10, goal=90,90
+============================================================
+  ✓ Generated: map_d0.4_s42_sm3_cr2
 
-### Paso 4: Simular
-```bash
-python viz/plot_policy.py --simulate --action-mode argmax
-```
-→ Genera: `policy_plots/policy_path.png`
+============================================================
+Training on generated map
+============================================================
+🔧 Training policy...
+  Policy saved to: policy.txt and sim_maps/map_d0.4_s42_sm3_cr2/policy.txt
 
-**✅ ¡Listo!** El agente está entrenado y simulado.
+🎮 Simulating policy...
+  Auto-detected policy from: sim_maps\map_d0.4_s42_sm3_cr2\policy.txt
+  Saved rollout plot to sim_maps\map_d0.4_s42_sm3_cr2\policy_path.png
+  Simulation stop reason: reached-goal
+
+✅ Pipeline complete!
+```
 
 ---
 

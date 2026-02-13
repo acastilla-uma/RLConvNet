@@ -82,6 +82,25 @@ def load_reward_csv(path):
     return np.array(data, dtype=float)
 
 
+def load_start_goal(reward_path):
+    if not reward_path:
+        return None
+    folder = os.path.dirname(reward_path)
+    if not folder:
+        return None
+    path = os.path.join(folder, "start_goal.csv")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as fp:
+        line = fp.readline().strip()
+        if not line:
+            return None
+        parts = [int(v) for v in line.split(",")]
+        if len(parts) < 4:
+            return None
+        return parts[0], parts[1], parts[2], parts[3]
+
+
 def plot_grid(grid, title, save_path=None, show=False):
     plt.figure(figsize=(6, 5))
     plt.imshow(grid, cmap="viridis", origin="lower")
@@ -311,7 +330,19 @@ def choose_random_start(reward, obstacle_value, rng):
     return int(ys[idx]), int(xs[idx])
 
 
-def simulate_policy(policy, reward, start, goal, start_orient, steps=500, obstacle_value=-1.0, action_mode="argmax", temperature=1.0, seed=None):
+def simulate_policy(
+    policy,
+    reward,
+    start,
+    goal,
+    start_orient,
+    steps=500,
+    obstacle_value=-1.0,
+    action_mode="argmax",
+    temperature=1.0,
+    seed=None,
+    goal_radius=0,
+):
     h, w = reward.shape
     vectors = action_vectors()
     gmap = gmap_table()
@@ -328,7 +359,7 @@ def simulate_policy(policy, reward, start, goal, start_orient, steps=500, obstac
             reason = "start-out-of-bounds"
             break
         path.append((y, x))
-        if (y, x) == goal:
+        if max(abs(y - goal[0]), abs(x - goal[1])) <= goal_radius:
             reason = "reached-goal"
             break
         state = (y, x, orient)
@@ -514,6 +545,7 @@ def main():
     parser.add_argument("--start-x", type=int, default=5, help="Start x for simulation")
     parser.add_argument("--start-y", type=int, default=5, help="Start y for simulation")
     parser.add_argument("--start-orient", type=int, default=0, help="Start orientation for simulation")
+    parser.add_argument("--goal-radius", type=int, default=0, help="Goal radius for simulation stop condition")
     parser.add_argument("--steps", type=int, default=500, help="Max steps for simulation")
     parser.add_argument("--print-table", action="store_true", help="Print action table")
     parser.add_argument("--show", action="store_true", help="Show plot window")
@@ -616,9 +648,26 @@ def main():
     if args.simulate:
         reward = load_reward_csv(args.reward)
         h, w = reward.shape
-        goal = (93, 93)
         start = (args.start_y, args.start_x)
-        path, reason = simulate_policy(policy, reward, start, goal, args.start_orient, steps=args.steps, action_mode=args.action_mode, temperature=args.temperature, seed=args.seed_sim)
+        start_goal = load_start_goal(args.reward)
+        if start_goal:
+            sx, sy, gx, gy = start_goal
+            start = (sy, sx)
+            goal = (gy, gx)
+        else:
+            goal = (max(0, h - 2), max(0, w - 2))
+        path, reason = simulate_policy(
+            policy,
+            reward,
+            start,
+            goal,
+            args.start_orient,
+            steps=args.steps,
+            action_mode=args.action_mode,
+            temperature=args.temperature,
+            seed=args.seed_sim,
+            goal_radius=args.goal_radius,
+        )
         out_path = os.path.join(args.out_dir, "policy_path.png")
         plot_reward_with_path(reward, path, goal, "policy rollout", save_path=out_path, show=args.show)
         print(f"Saved rollout plot to {out_path}")

@@ -132,7 +132,17 @@ def distance_to_obstacles(obstacles, w, h):
     return dist
 
 
-def build_reward_map(obstacles, w, h, obstacle_penalty, free_reward, reward_range):
+def build_reward_map(
+    obstacles,
+    w,
+    h,
+    obstacle_penalty,
+    free_reward,
+    reward_range,
+    goal,
+    goal_reward,
+    goal_radius,
+):
     reward_min, reward_max = reward_range
     reward = [[free_reward for _ in range(w)] for _ in range(h)]
 
@@ -146,6 +156,14 @@ def build_reward_map(obstacles, w, h, obstacle_penalty, free_reward, reward_rang
             else:
                 t = dist[y][x] / max_dist
                 reward[y][x] = reward_min + t * (reward_max - reward_min)
+    if goal is not None:
+        gx, gy = goal
+        for dy in range(-goal_radius, goal_radius + 1):
+            for dx in range(-goal_radius, goal_radius + 1):
+                nx = gx + dx
+                ny = gy + dy
+                if 0 <= nx < w and 0 <= ny < h and obstacles[ny][nx] == 0:
+                    reward[ny][nx] = max(reward[ny][nx], goal_reward)
     return reward
 
 
@@ -193,9 +211,11 @@ def main():
     parser.add_argument("--obstacle-penalty", type=float, default=-1.0)
     parser.add_argument("--free-reward", type=float, default=0.0)
     parser.add_argument("--start", type=str, default="5,5")
-    parser.add_argument("--goal", type=str, default="94,94")
+    parser.add_argument("--goal", type=str, default="50,50")
     parser.add_argument("--reward-min", type=float, default=0)
     parser.add_argument("--reward-max", type=float, default=1)
+    parser.add_argument("--goal-reward", type=float, default=5.0, help="Reward at/near goal")
+    parser.add_argument("--goal-radius", type=int, default=1, help="Radius around goal with reward boost")
     args = parser.parse_args()
 
     w, h = args.width, args.height
@@ -216,6 +236,9 @@ def main():
         args.obstacle_penalty,
         args.free_reward,
         (args.reward_min, args.reward_max),
+        (gx, gy),
+        args.goal_reward,
+        args.goal_radius,
     )
 
     # Create descriptive folder with map parameters

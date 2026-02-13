@@ -6,7 +6,6 @@ Automates: generate map -> train solver -> simulate policy
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +21,16 @@ def list_available_maps(maps_dir="sim_maps"):
     return sorted(maps)
 
 
-def generate_map(density, seed, smooth=3, carve=2, width=100, height=100):
+def generate_map(
+    density,
+    seed,
+    smooth=3,
+    carve=2,
+    width=100,
+    height=100,
+    start="5,5",
+    goal="94,94",
+):
     """Generate a map using map_generator.py."""
     cmd = [
         "python", "sim/map_generator.py",
@@ -31,7 +39,9 @@ def generate_map(density, seed, smooth=3, carve=2, width=100, height=100):
         "--smooth", str(smooth),
         "--carve", str(carve),
         "--width", str(width),
-        "--height", str(height)
+        "--height", str(height),
+        "--start", str(start),
+        "--goal", str(goal),
     ]
     
     print(f"  Running: {' '.join(cmd[:5])}...")
@@ -100,7 +110,7 @@ def train_policy(map_folder, solver_exe="rl_convnet_simple.exe", tol=1e-4, k_max
         return None
 
 
-def simulate_policy(map_folder, steps=10000, action_mode="argmax", temperature=1.0):
+def simulate_policy(map_folder, steps=10000, action_mode="argmax", temperature=1.0, goal_radius=0):
     """Simulate policy for a map."""
     reward_csv = os.path.join(map_folder, "reward.csv")
     
@@ -114,7 +124,9 @@ def simulate_policy(map_folder, steps=10000, action_mode="argmax", temperature=1
         "--steps", str(steps),
         "--reward", reward_csv,
         "--action-mode", action_mode,
-        "--temperature", str(temperature)
+        "--temperature", str(temperature),
+        "--goal-radius", str(goal_radius),
+        "--out-dir", map_folder,
     ]
     
     print(f"  Running simulation...")
@@ -125,13 +137,6 @@ def simulate_policy(map_folder, steps=10000, action_mode="argmax", temperature=1
         for line in output.split('\n'):
             if 'Auto-detected' in line or 'Saved' in line or 'reason:' in line:
                 print(f"  {line.strip()}")
-        
-        # Copy policy plot to map folder
-        plot_src = "policy_plots/policy_path.png"
-        plot_dst = os.path.join(map_folder, "policy_path.png")
-        if os.path.exists(plot_src):
-            shutil.copy(plot_src, plot_dst)
-            print(f"  Saved plot to: {plot_dst}")
         
         return True
     except subprocess.TimeoutExpired:
@@ -186,6 +191,18 @@ def main():
         default=2,
         help="Carve radius for path generation"
     )
+    parser.add_argument(
+        "--start",
+        type=str,
+        default="5,5",
+        help="Start position as 'x,y'"
+    )
+    parser.add_argument(
+        "--goal",
+        type=str,
+        default="94,94",
+        help="Goal position as 'x,y'"
+    )
     
     # Solver parameters
     parser.add_argument(
@@ -221,6 +238,12 @@ def main():
         default=1.0,
         help="Temperature for softmax action selection"
     )
+    parser.add_argument(
+        "--goal-radius",
+        type=int,
+        default=0,
+        help="Goal radius for simulation stop condition"
+    )
     
     # Batch processing
     parser.add_argument(
@@ -238,14 +261,19 @@ def main():
             sys.exit(1)
         
         print(f"\n{'='*60}")
-        print(f"Generating map: density={args.density}, seed={args.seed}")
+        print(
+            f"Generating map: density={args.density}, seed={args.seed}, "
+            f"start={args.start}, goal={args.goal}"
+        )
         print(f"{'='*60}")
         
         map_path = generate_map(
             density=args.density,
             seed=args.seed,
             smooth=args.smooth,
-            carve=args.carve
+            carve=args.carve,
+            start=args.start,
+            goal=args.goal,
         )
         
         if not map_path:
@@ -265,7 +293,8 @@ def main():
             map_path,
             steps=args.steps,
             action_mode=args.action_mode,
-            temperature=args.temperature
+            temperature=args.temperature,
+            goal_radius=args.goal_radius,
         )
         
         print(f"\n✅ Pipeline complete!")

@@ -12,7 +12,7 @@ static int parse_double_arg(const char *opt, const char *value, double *out);
 #define MAX_ORIENT 8
 #define MAX_ACTIONS 6
 #define DEFAULT_K_ITERS 1000
-#define DEFAULT_ALLOWED_ACTIONS 3
+#define DEFAULT_ALLOWED_ACTIONS 6
 
 static int n_orient = MAX_ORIENT;
 static int n_actions = MAX_ACTIONS;
@@ -383,7 +383,8 @@ int main(int argc, char **argv) {
                             for (int kx = 0; kx < 3; ++kx) {
                                 double w = kernel[j][i][ky][kx];
                                 if (w != 0.0) {
-                                    acc += V[gj][y + ky][x + kx] * w;
+                                    //acc += V[gj][y + ky][x + kx] * w;
+                                    acc += V[gj][y + ky][x + kx];
                                 }
                             }
                         }

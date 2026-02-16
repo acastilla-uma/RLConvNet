@@ -15,6 +15,7 @@ import sys
 import re
 import shutil
 from datetime import datetime
+from html import escape
 from pathlib import Path
 
 
@@ -248,7 +249,7 @@ def generate_policy_mosaic_custom(map_name, output_filename):
         return None
 
 
-def generate_html_report(map_name, experiments, report_path):
+def generate_html_report(map_name, experiments, report_path, notes=None):
     """Generate HTML report with all results and visualizations."""
     
     # Get map info
@@ -289,6 +290,14 @@ def generate_html_report(map_name, experiments, report_path):
         }}
         .metadata p {{
             margin: 5px 0;
+        }}
+        .notes {{
+            margin-top: 8px;
+            padding: 10px 12px;
+            background-color: #ffffff;
+            border: 1px solid #dcdcdc;
+            border-radius: 4px;
+            white-space: pre-wrap;
         }}
         table {{
             width: 100%;
@@ -388,6 +397,7 @@ def generate_html_report(map_name, experiments, report_path):
         <p><strong>Semilla:</strong> {seed}</p>
         <p><strong>Fecha de generación:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
         <p><strong>Total de experimentos:</strong> {len(experiments)}</p>
+        {f"<p><strong>Notas:</strong></p><div class=\"notes\">{escape(notes)}</div>" if notes else ""}
     </div>
     
     <h2>📈 Resumen de Resultados</h2>
@@ -575,6 +585,13 @@ def main():
         default=None,
         help="Output path for HTML report (default: sim_maps/<map>/experiment_report.html)"
     )
+
+    parser.add_argument(
+        "--notes",
+        type=str,
+        default=None,
+        help="Optional notes to include in the HTML report"
+    )
     
     args = parser.parse_args()
     
@@ -644,7 +661,7 @@ def main():
     else:
         report_path = os.path.join(map_path, "experiment_report.html")
     
-    generate_html_report(args.map, experiments, report_path)
+    generate_html_report(args.map, experiments, report_path, notes=args.notes)
     
     # Summary
     print(f"\n{'='*70}")

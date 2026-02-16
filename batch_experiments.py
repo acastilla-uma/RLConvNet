@@ -257,9 +257,17 @@ def generate_html_report(map_name, experiments, report_path, notes=None):
     density = map_parts[1][1:] if len(map_parts) > 1 else "?"
     seed = map_parts[2][1:] if len(map_parts) > 2 else "?"
     
-    notes_html = ""
-    if notes:
-        notes_html = f"<p><strong>Notas:</strong></p><div class=\"notes\">{escape(notes)}</div>"
+    safe_notes = escape(notes) if notes else ""
+    notes_html = (
+        "<p><strong>Notas:</strong></p>"
+        "<div class=\"notes-block\">"
+        f"<textarea id=\"notes\" class=\"notes-area\" rows=\"4\">{safe_notes}</textarea>"
+        "<div class=\"notes-actions\">"
+        "<button id=\"save-notes\" class=\"notes-btn\" type=\"button\">Guardar notas</button>"
+        "<span class=\"notes-help\">Se guardan en este navegador (localStorage).</span>"
+        "</div>"
+        "</div>"
+    )
 
     html = f"""<!DOCTYPE html>
 <html lang="es">
@@ -302,6 +310,40 @@ def generate_html_report(map_name, experiments, report_path, notes=None):
             border: 1px solid #dcdcdc;
             border-radius: 4px;
             white-space: pre-wrap;
+        }}
+        .notes-block {{
+            margin-top: 8px;
+        }}
+        .notes-area {{
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px;
+            border: 1px solid #dcdcdc;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 14px;
+            resize: vertical;
+        }}
+        .notes-actions {{
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 8px;
+        }}
+        .notes-btn {{
+            padding: 6px 12px;
+            background-color: #3498db;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+        }}
+        .notes-btn:hover {{
+            background-color: #2e86c1;
+        }}
+        .notes-help {{
+            color: #7f8c8d;
+            font-size: 12px;
         }}
         table {{
             width: 100%;
@@ -532,6 +574,28 @@ def generate_html_report(map_name, experiments, report_path, notes=None):
         <p>Generado automáticamente por batch_experiments.py</p>
         <p>{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
     </div>
+
+    <script>
+        (function() {{
+            const notesKey = "experiment_notes_{map_name}";
+            const notesArea = document.getElementById("notes");
+            const saveBtn = document.getElementById("save-notes");
+
+            if (!notesArea) return;
+
+            const cached = localStorage.getItem(notesKey);
+            if (cached !== null) {{
+                notesArea.value = cached;
+            }}
+
+            if (saveBtn) {{
+                saveBtn.addEventListener("click", function() {{
+                    localStorage.setItem(notesKey, notesArea.value);
+                    notesArea.textContent = notesArea.value;
+                }});
+            }}
+        }})();
+    </script>
 </body>
 </html>
 """
@@ -665,7 +729,17 @@ def main():
     else:
         report_path = os.path.join(map_path, "experiment_report.html")
     
-    generate_html_report(args.map, experiments, report_path, notes=args.notes)
+    notes_value = args.notes
+    if notes_value is None:
+        notes_path = os.path.join(os.path.dirname(report_path), "notes.txt")
+        if os.path.exists(notes_path):
+            try:
+                with open(notes_path, "r", encoding="utf-8", errors="ignore") as f:
+                    notes_value = f.read().strip()
+            except OSError as exc:
+                print(f"Warning: could not read notes file: {notes_path} ({exc})")
+
+    generate_html_report(args.map, experiments, report_path, notes=notes_value)
     
     # Summary
     print(f"\n{'='*70}")

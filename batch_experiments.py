@@ -257,6 +257,10 @@ def generate_html_report(map_name, experiments, report_path, notes=None):
     density = map_parts[1][1:] if len(map_parts) > 1 else "?"
     seed = map_parts[2][1:] if len(map_parts) > 2 else "?"
     
+    notes_html = ""
+    if notes:
+        notes_html = f"<p><strong>Notas:</strong></p><div class=\"notes\">{escape(notes)}</div>"
+
     html = f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -397,7 +401,7 @@ def generate_html_report(map_name, experiments, report_path, notes=None):
         <p><strong>Semilla:</strong> {seed}</p>
         <p><strong>Fecha de generación:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
         <p><strong>Total de experimentos:</strong> {len(experiments)}</p>
-        {f"<p><strong>Notas:</strong></p><div class=\"notes\">{escape(notes)}</div>" if notes else ""}
+        {notes_html}
     </div>
     
     <h2>📈 Resumen de Resultados</h2>

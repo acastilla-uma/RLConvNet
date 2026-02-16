@@ -233,6 +233,26 @@ static void init_kernels(void) {
     kernel[7][3][2][2] = 1.0;  gmap[7][3] = 8;
     kernel[7][4][1][2] = 1.0;  gmap[7][4] = 7;
     kernel[7][5][2][1] = 1.0;  gmap[7][5] = 1;
+
+    // Make kernels stochastic: 0.8 follow action, 0.2 stay in place.
+    for (int j = 0; j < MAX_ORIENT; ++j) {
+        for (int i = 0; i < MAX_ACTIONS; ++i) {
+            double total = 0.0;
+            for (int ky = 0; ky < 3; ++ky) {
+                for (int kx = 0; kx < 3; ++kx) {
+                    total += kernel[j][i][ky][kx];
+                }
+            }
+            if (total > 0.0) {
+                for (int ky = 0; ky < 3; ++ky) {
+                    for (int kx = 0; kx < 3; ++kx) {
+                        kernel[j][i][ky][kx] *= 0.8;
+                    }
+                }
+                kernel[j][i][1][1] += 0.2;
+            }
+        }
+    }
 }
 
 static void configure_transitions(void) {
@@ -383,8 +403,7 @@ int main(int argc, char **argv) {
                             for (int kx = 0; kx < 3; ++kx) {
                                 double w = kernel[j][i][ky][kx];
                                 if (w != 0.0) {
-                                    //acc += V[gj][y + ky][x + kx] * w;
-                                    acc += V[gj][y + ky][x + kx];
+                                    acc += V[gj][y + ky][x + kx] * w;
                                 }
                             }
                         }

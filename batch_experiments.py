@@ -234,7 +234,6 @@ def generate_policy_mosaic_custom(map_name, output_filename):
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, encoding='utf-8', errors='ignore')
         
-        # Rename the generated mosaic
         default_mosaic = os.path.join(map_path, "policy_argmax_mosaic.png")
         custom_mosaic = os.path.join(map_path, output_filename)
         
@@ -522,7 +521,9 @@ def generate_html_report(map_name, experiments, report_path, notes=None, embed_i
     <h2>Visualizaciones</h2>
 """
 
-    def img_src_for(path_value):
+    def img_src_for(path_value, data_value):
+        if embed_images and data_value:
+            return f"data:image/png;base64,{data_value}"
         if not path_value or not os.path.exists(path_value):
             return None
         if embed_images:
@@ -553,7 +554,7 @@ def generate_html_report(map_name, experiments, report_path, notes=None, embed_i
 """
         
         # Add trajectory plot
-        plot_src = img_src_for(exp.get('plot_path'))
+        plot_src = img_src_for(exp.get('plot_path'), exp.get('plot_data'))
         if plot_src:
             html += f"""
                 <div>
@@ -563,7 +564,7 @@ def generate_html_report(map_name, experiments, report_path, notes=None, embed_i
 """
         
         # Add mosaic plot
-        mosaic_src = img_src_for(exp.get('mosaic_path'))
+        mosaic_src = img_src_for(exp.get('mosaic_path'), exp.get('mosaic_data'))
         if mosaic_src:
             html += f"""
                 <div>
@@ -706,21 +707,43 @@ def main():
             # Simulate policy immediately after training
             sim_result = run_simulate(args.map, args.goal_radius, f" (exp {exp_num})")
             
-            # Rename and save the policy_path.png for this experiment
+            # Load trajectory image into memory and remove the file
             map_folder = os.path.join("sim_maps", args.map)
             source_path = os.path.join(map_folder, "policy_path.png")
-            dest_filename = f"policy_path_tol{tol:.0e}_kmax{k_max}.png"
-            dest_path = os.path.join(map_folder, dest_filename)
-            
+            plot_data = None
             if os.path.exists(source_path):
-                shutil.copy2(source_path, dest_path)
-                print(f"  [+] Saved trajectory plot: {dest_filename}")
+                try:
+                    with open(source_path, "rb") as img_file:
+                        plot_data = base64.b64encode(img_file.read()).decode("ascii")
+                except OSError as exc:
+                    print(f"  Warning: could not read trajectory image: {exc}")
+                try:
+                    os.remove(source_path)
+                except OSError:
+                    pass
             
             # Generate mosaic for this experiment if requested
             mosaic_path = None
+            mosaic_data = None
             if args.generate_mosaic:
                 mosaic_filename = f"policy_mosaic_tol{tol:.0e}_kmax{k_max}.png"
                 mosaic_path = generate_policy_mosaic_custom(args.map, mosaic_filename)
+                if mosaic_path and os.path.exists(mosaic_path):
+                    try:
+                        with open(mosaic_path, "rb") as img_file:
+                            mosaic_data = base64.b64encode(img_file.read()).decode("ascii")
+                    except OSError as exc:
+                        print(f"  Warning: could not read mosaic image: {exc}")
+                    try:
+                        os.remove(mosaic_path)
+                    except OSError:
+                        pass
+                default_mosaic = os.path.join(map_folder, "policy_argmax_mosaic.png")
+                if os.path.exists(default_mosaic):
+                    try:
+                        os.remove(default_mosaic)
+                    except OSError:
+                        pass
             
             # Combine results
             experiment = {
@@ -733,8 +756,10 @@ def main():
                 'success': train_result['success'],
                 'stop_reason': sim_result['stop_reason'],
                 'stop_reason_spanish': sim_result['stop_reason_spanish'],
-                'plot_path': dest_path if os.path.exists(dest_path) else None,
-                'mosaic_path': mosaic_path
+                'plot_path': None,
+                'plot_data': plot_data,
+                'mosaic_path': None,
+                'mosaic_data': mosaic_data
             }
             experiments.append(experiment)
     
@@ -742,7 +767,7 @@ def main():
     if args.report:
         report_path = args.report
     else:
-        report_path = os.path.join(map_path, "experiment_report.html")
+        report_path = os.path.join(map_path, f"{args.map}.html")
     
     notes_value = args.notes
     if notes_value is None:

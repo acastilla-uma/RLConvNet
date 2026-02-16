@@ -14,6 +14,7 @@ import subprocess
 import sys
 import re
 import shutil
+import base64
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -249,7 +250,7 @@ def generate_policy_mosaic_custom(map_name, output_filename):
         return None
 
 
-def generate_html_report(map_name, experiments, report_path, notes=None):
+def generate_html_report(map_name, experiments, report_path, notes=None, embed_images=True):
     """Generate HTML report with all results and visualizations."""
     
     # Get map info
@@ -520,6 +521,19 @@ def generate_html_report(map_name, experiments, report_path, notes=None):
     html += """
     <h2>Visualizaciones</h2>
 """
+
+    def img_src_for(path_value):
+        if not path_value or not os.path.exists(path_value):
+            return None
+        if embed_images:
+            try:
+                with open(path_value, "rb") as img_file:
+                    encoded = base64.b64encode(img_file.read()).decode("ascii")
+                return f"data:image/png;base64,{encoded}"
+            except OSError:
+                return None
+        rel_path = os.path.relpath(path_value, os.path.dirname(report_path))
+        return rel_path.replace(os.sep, "/")
     
     # Add trajectory plots and mosaics for each experiment
     html += """
@@ -539,22 +553,22 @@ def generate_html_report(map_name, experiments, report_path, notes=None):
 """
         
         # Add trajectory plot
-        if exp.get('plot_path') and os.path.exists(exp['plot_path']):
-            rel_path = os.path.relpath(exp['plot_path'], os.path.dirname(report_path))
+        plot_src = img_src_for(exp.get('plot_path'))
+        if plot_src:
             html += f"""
                 <div>
                     <h5 style="text-align: center; color: #34495e; margin-bottom: 10px;">Trayectoria Simulada</h5>
-                    <img src="{rel_path.replace(os.sep, '/')}" alt="Policy Path Exp {exp['exp_num']}" style="width: 100%;">
+                    <img src="{plot_src}" alt="Policy Path Exp {exp['exp_num']}" style="width: 100%;">
                 </div>
 """
         
         # Add mosaic plot
-        if exp.get('mosaic_path') and os.path.exists(exp['mosaic_path']):
-            rel_path = os.path.relpath(exp['mosaic_path'], os.path.dirname(report_path))
+        mosaic_src = img_src_for(exp.get('mosaic_path'))
+        if mosaic_src:
             html += f"""
                 <div>
                     <h5 style="text-align: center; color: #34495e; margin-bottom: 10px;">Mosaico de Políticas</h5>
-                    <img src="{rel_path.replace(os.sep, '/')}" alt="Policy Mosaic Exp {exp['exp_num']}" style="width: 100%;">
+                    <img src="{mosaic_src}" alt="Policy Mosaic Exp {exp['exp_num']}" style="width: 100%;">
                 </div>
 """
         
@@ -660,6 +674,7 @@ def main():
         default=None,
         help="Optional notes to include in the HTML report"
     )
+
     
     args = parser.parse_args()
     
@@ -739,7 +754,12 @@ def main():
             except OSError as exc:
                 print(f"Warning: could not read notes file: {notes_path} ({exc})")
 
-    generate_html_report(args.map, experiments, report_path, notes=notes_value)
+    generate_html_report(
+        args.map,
+        experiments,
+        report_path,
+        notes=notes_value
+    )
     
     # Summary
     print(f"\n{'='*70}")

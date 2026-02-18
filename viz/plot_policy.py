@@ -358,17 +358,26 @@ def simulate_policy(
         if not (0 <= x < w and 0 <= y < h):
             reason = "start-out-of-bounds"
             break
-        path.append((y, x))
+        
+        # Check goal first (highest priority)
         if max(abs(y - goal[0]), abs(x - goal[1])) <= goal_radius:
             reason = "reached-goal"
+            path.append((y, x))
             break
+        
+        # Check for cycles (second priority)
         state = (y, x, orient)
         if state in visited:
             reason = "cycle"
             break
         visited.add(state)
+        
+        # Add position to path
+        path.append((y, x))
+        
+        # Check for obstacles
         if reward[y, x] <= obstacle_value:
-            reason = "start-on-obstacle"
+            reason = "hit-obstacle"
             break
 
         key = (orient, 0)
@@ -542,10 +551,10 @@ def main():
     parser.add_argument("--stride", type=int, default=1, help="Arrow stride for argmax plots")
     parser.add_argument("--reward", default="sim_maps/reward.csv", help="Path to reward CSV for simulation")
     parser.add_argument("--simulate", action="store_true", help="Simulate policy on reward map")
-    parser.add_argument("--start-x", type=int, default=5, help="Start x for simulation")
-    parser.add_argument("--start-y", type=int, default=5, help="Start y for simulation")
+    parser.add_argument("--start-x", type=int, default=None, help="Start x for simulation (overrides start_goal.csv if provided)")
+    parser.add_argument("--start-y", type=int, default=None, help="Start y for simulation (overrides start_goal.csv if provided)")
     parser.add_argument("--start-orient", type=int, default=0, help="Start orientation for simulation")
-    parser.add_argument("--goal-radius", type=int, default=0, help="Goal radius for simulation stop condition")
+    parser.add_argument("--goal-radius", type=int, default=3, help="Goal radius for simulation stop condition")
     parser.add_argument("--steps", type=int, default=500, help="Max steps for simulation")
     parser.add_argument("--print-table", action="store_true", help="Print action table")
     parser.add_argument("--show", action="store_true", help="Show plot window")
@@ -648,14 +657,33 @@ def main():
     if args.simulate:
         reward = load_reward_csv(args.reward)
         h, w = reward.shape
-        start = (args.start_y, args.start_x)
+        
+        # Load start_goal.csv if it exists
         start_goal = load_start_goal(args.reward)
-        if start_goal:
+        
+        # Determine start position: explicit args > start_goal.csv > defaults
+        if args.start_x is not None and args.start_y is not None:
+            # User explicitly provided coordinates
+            start = (args.start_y, args.start_x)
+            print(f"[*] Using explicit start coordinates: ({args.start_x}, {args.start_y})")
+        elif start_goal:
+            # Load from start_goal.csv
             sx, sy, gx, gy = start_goal
             start = (sy, sx)
+            print(f"[*] Loaded start from start_goal.csv: ({sx}, {sy})")
+        else:
+            # Use defaults
+            start = (5, 5)
+            print(f"[*] Using default start coordinates: (5, 5)")
+        
+        # Determine goal position: start_goal.csv > defaults
+        if start_goal:
+            sx, sy, gx, gy = start_goal
             goal = (gy, gx)
+            print(f"[*] Loaded goal from start_goal.csv: ({gx}, {gy})")
         else:
             goal = (max(0, h - 2), max(0, w - 2))
+            print(f"[*] Using default goal coordinates: {goal}")
         path, reason = simulate_policy(
             policy,
             reward,

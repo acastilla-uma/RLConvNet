@@ -15,6 +15,7 @@ import sys
 import re
 import shutil
 import base64
+import json
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -139,15 +140,17 @@ def generate_html_report(map_name, experiments, report_path, notes=None, embed_i
     seed = map_parts[2][1:] if len(map_parts) > 2 else "?"
     
     safe_notes = escape(notes) if notes else ""
+    notes_json = json.dumps({"notes": notes if notes else ""})
     notes_html = (
         "<p><strong>Notas:</strong></p>"
         "<div class=\"notes-block\">"
         f"<textarea id=\"notes\" class=\"notes-area\" rows=\"4\">{safe_notes}</textarea>"
         "<div class=\"notes-actions\">"
         "<button id=\"save-notes\" class=\"notes-btn\" type=\"button\">Guardar notas</button>"
-        "<span class=\"notes-help\">Se guardan en este navegador (localStorage).</span>"
+        "<span class=\"notes-help\">Se guardan en el archivo HTML al hacer click en Guardar.</span>"
         "</div>"
         "</div>"
+        f"<div id=\"notes-data\" style=\"display:none;\">{notes_json}</div>"
     )
 
     html = f"""<!DOCTYPE html>
@@ -458,21 +461,43 @@ def generate_html_report(map_name, experiments, report_path, notes=None, embed_i
 
     <script>
         (function() {{
-            const notesKey = "experiment_notes_{map_name}";
             const notesArea = document.getElementById("notes");
             const saveBtn = document.getElementById("save-notes");
+            const notesData = document.getElementById("notes-data");
 
-            if (!notesArea) return;
+            if (!notesArea || !notesData) return;
 
-            const cached = localStorage.getItem(notesKey);
-            if (cached !== null) {{
-                notesArea.value = cached;
+            // Load initial notes from embedded JSON
+            try {{
+                const data = JSON.parse(notesData.textContent);
+                if (data.notes) {{
+                    notesArea.value = data.notes;
+                }}
+            }} catch (e) {{
+                console.error("Error parsing notes data:", e);
             }}
 
             if (saveBtn) {{
                 saveBtn.addEventListener("click", function() {{
-                    localStorage.setItem(notesKey, notesArea.value);
-                    notesArea.textContent = notesArea.value;
+                    // Update the embedded notes data
+                    const updatedData = {{ notes: notesArea.value }};
+                    notesData.textContent = JSON.stringify(updatedData);
+                    
+                    // Get the full HTML with updated notes
+                    const htmlContent = document.documentElement.outerHTML;
+                    
+                    // Create blob and download
+                    const blob = new Blob([htmlContent], {{ type: 'text/html;charset=utf-8' }});
+                    const link = document.createElement('a');
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', '{map_name}_experiment_report.html');
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    
+                    alert('Notas guardadas. El archivo HTML se ha descargado.');
                 }});
             }}
         }})();
@@ -495,15 +520,21 @@ def main():
     parser.add_argument(
         "--map",
         type=str,
-        required=True,
-        help="Map name (e.g., map_d0.7_s42_sm3_cr2)"
+        default=None,
+        help="Map name (e.g., map_d0.7_s42_sm3_cr2). Required if --all-maps not specified."
+    )
+    
+    parser.add_argument(
+        "--all-maps",
+        action="store_true",
+        help="Run experiments for all maps in sim_maps/ directory"
     )
     
     parser.add_argument(
         "--tol",
         type=float,
         nargs='+',
-        default=[1e-3, 1e-4, 1e-5],
+        default=[1e-3],
         help="Tolerance values to test (e.g., 1e-3 1e-4 1e-5)"
     )
     
@@ -511,7 +542,7 @@ def main():
         "--k-max",
         type=int,
         nargs='+',
-        default=[1000, 5000, 10000],
+        default=[50, 100, 1000, 5000],
         help="Maximum iteration values to test (e.g., 1000 5000 10000)"
     )
     
@@ -552,6 +583,11 @@ def main():
     
     args = parser.parse_args()
     
+    # Validate map arguments
+    if not args.map and not args.all_maps:
+        print(f"ERROR: Specify either --map <name> or --all-maps")
+        sys.exit(1)
+    
     # Find solver executable
     solver_exe = find_solver_executable(args.solver_exe)
     if not solver_exe:
@@ -559,135 +595,155 @@ def main():
         sys.exit(1)
     print(f"[*] Using solver: {solver_exe}")
     
-    # Verify map exists
-    map_path = os.path.join("sim_maps", args.map)
-    if not os.path.isdir(map_path):
-        print(f"ERROR: Map folder not found: {map_path}")
-        sys.exit(1)
-    
-    print(f"\n{'='*70}")
-    print(f"BATCH EXPERIMENTS")
-    print(f"{'='*70}")
-    print(f"Map: {args.map}")
-    print(f"Tolerances: {', '.join(f'{t:.1e}' for t in args.tol)}")
-    print(f"K-max values: {', '.join(str(k) for k in args.k_max)}")
-    print(f"Total experiments: {len(args.tol) * len(args.k_max)}")
-    
-    # Run all experiments
-    experiments = []
-    exp_num = 0
-    
-    for tol in args.tol:
-        for k_max in args.k_max:
-            exp_num += 1
-            
-            # Train policy
-            train_result = run_train_batch(args.map, tol, k_max, solver_exe)
-            
-            # Simulate policy immediately after training
-            sim_result = run_simulate(args.map, args.goal_radius, f" (exp {exp_num})")
-            
-            # Load trajectory image into memory and remove the file
-            map_folder = os.path.join("sim_maps", args.map)
-            source_path = os.path.join(map_folder, "policy_path.png")
-            plot_data = None
-            if os.path.exists(source_path):
-                try:
-                    with open(source_path, "rb") as img_file:
-                        plot_data = base64.b64encode(img_file.read()).decode("ascii")
-                except OSError as exc:
-                    print(f"  Warning: could not read trajectory image: {exc}")
-                try:
-                    os.remove(source_path)
-                except OSError:
-                    pass
-            
-            # Generate mosaic for this experiment if requested
-            mosaic_data = None
-            if args.generate_mosaic:
-                mosaic_path = os.path.join(map_folder, "policy_argmax_mosaic.png")
-                cmd = [
-                    "python", "viz/plot_policy.py",
-                    "--input", os.path.join(map_folder, "policy.txt"),
-                    "--mosaic",
-                    "--arrows",
-                    "--stride", "5",
-                    "--out-dir", map_folder
-                ]
-                try:
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, encoding='utf-8', errors='ignore')
-                    if os.path.exists(mosaic_path):
-                        try:
-                            with open(mosaic_path, "rb") as img_file:
-                                mosaic_data = base64.b64encode(img_file.read()).decode("ascii")
-                        except OSError as exc:
-                            print(f"  Warning: could not read mosaic image: {exc}")
-                        try:
-                            os.remove(mosaic_path)
-                        except OSError:
-                            pass
-                except Exception as e:
-                    print(f"  Warning: mosaic generation failed: {e}")
-            
-            # Combine results
-            experiment = {
-                'exp_num': exp_num,
-                'tol': tol,
-                'k_max': k_max,
-                'iters': train_result['iters'],
-                'converged': train_result['converged'],
-                'convergence_message': train_result.get('convergence_message', 'Desconocido'),
-                'success': train_result['success'],
-                'stop_reason': sim_result['stop_reason'],
-                'stop_reason_spanish': sim_result['stop_reason_spanish'],
-                'plot_data': plot_data,
-                'mosaic_data': mosaic_data
-            }
-            experiments.append(experiment)
-    
-    # Generate HTML report
-    if args.report:
-        report_path = args.report
+    # Get list of maps to process
+    if args.all_maps:
+        sim_maps_dir = "sim_maps"
+        if not os.path.isdir(sim_maps_dir):
+            print(f"ERROR: sim_maps directory not found")
+            sys.exit(1)
+        maps_to_process = [d for d in os.listdir(sim_maps_dir) 
+                           if os.path.isdir(os.path.join(sim_maps_dir, d))]
+        maps_to_process.sort()
+        if not maps_to_process:
+            print(f"ERROR: No maps found in sim_maps/ directory")
+            sys.exit(1)
     else:
-        report_path = os.path.join(map_path, f"{args.map}.html")
+        map_path = os.path.join("sim_maps", args.map)
+        if not os.path.isdir(map_path):
+            print(f"ERROR: Map folder not found: {map_path}")
+            sys.exit(1)
+        maps_to_process = [args.map]
     
-    notes_value = args.notes
-    if notes_value is None:
-        notes_path = os.path.join(os.path.dirname(report_path), "notes.txt")
-        if os.path.exists(notes_path):
-            try:
-                with open(notes_path, "r", encoding="utf-8", errors="ignore") as f:
-                    notes_value = f.read().strip()
-            except OSError as exc:
-                print(f"Warning: could not read notes file: {notes_path} ({exc})")
+    # Process each map
+    for map_name in maps_to_process:
+        print(f"\n{'='*70}")
+        print(f"BATCH EXPERIMENTS")
+        print(f"{'='*70}")
+        print(f"Map: {map_name}")
+        print(f"Tolerances: {', '.join(f'{t:.1e}' for t in args.tol)}")
+        print(f"K-max values: {', '.join(str(k) for k in args.k_max)}")
+        print(f"Total experiments: {len(args.tol) * len(args.k_max)}")
+        
+        # Run all experiments
+        experiments = []
+        exp_num = 0
+        map_path = os.path.join("sim_maps", map_name)
+        
+        for tol in args.tol:
+            for k_max in args.k_max:
+                exp_num += 1
+                
+                # Train policy
+                train_result = run_train_batch(map_name, tol, k_max, solver_exe)
+                
+                # Simulate policy immediately after training
+                sim_result = run_simulate(map_name, args.goal_radius, f" (exp {exp_num})")
+                
+                # Load trajectory image into memory and remove the file
+                map_folder = os.path.join("sim_maps", map_name)
+                source_path = os.path.join(map_folder, "policy_path.png")
+                plot_data = None
+                if os.path.exists(source_path):
+                    try:
+                        with open(source_path, "rb") as img_file:
+                            plot_data = base64.b64encode(img_file.read()).decode("ascii")
+                    except OSError as exc:
+                        print(f"  Warning: could not read trajectory image: {exc}")
+                    try:
+                        os.remove(source_path)
+                    except OSError:
+                        pass
+                
+                # Generate mosaic for this experiment if requested
+                mosaic_data = None
+                if args.generate_mosaic:
+                    mosaic_path = os.path.join(map_folder, "policy_argmax_mosaic.png")
+                    cmd = [
+                        "python", "viz/plot_policy.py",
+                        "--input", os.path.join(map_folder, "policy.txt"),
+                        "--mosaic",
+                        "--arrows",
+                        "--stride", "5",
+                        "--out-dir", map_folder
+                    ]
+                    try:
+                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, encoding='utf-8', errors='ignore')
+                        if os.path.exists(mosaic_path):
+                            try:
+                                with open(mosaic_path, "rb") as img_file:
+                                    mosaic_data = base64.b64encode(img_file.read()).decode("ascii")
+                            except OSError as exc:
+                                print(f"  Warning: could not read mosaic image: {exc}")
+                            try:
+                                os.remove(mosaic_path)
+                            except OSError:
+                                pass
+                    except Exception as e:
+                        print(f"  Warning: mosaic generation failed: {e}")
+                
+                # Combine results
+                experiment = {
+                    'exp_num': exp_num,
+                    'tol': tol,
+                    'k_max': k_max,
+                    'iters': train_result['iters'],
+                    'converged': train_result['converged'],
+                    'convergence_message': train_result.get('convergence_message', 'Desconocido'),
+                    'success': train_result['success'],
+                    'stop_reason': sim_result['stop_reason'],
+                    'stop_reason_spanish': sim_result['stop_reason_spanish'],
+                    'plot_data': plot_data,
+                    'mosaic_data': mosaic_data
+                }
+                experiments.append(experiment)
+        
+        # Generate HTML report
+        if args.report:
+            report_path = args.report
+        else:
+            report_path = os.path.join(map_path, f"{map_name}.html")
+        
+        notes_value = args.notes
+        if notes_value is None:
+            notes_path = os.path.join(os.path.dirname(report_path), "notes.txt")
+            if os.path.exists(notes_path):
+                try:
+                    with open(notes_path, "r", encoding="utf-8", errors="ignore") as f:
+                        notes_value = f.read().strip()
+                except OSError as exc:
+                    print(f"Warning: could not read notes file: {notes_path} ({exc})")
 
-    generate_html_report(
-        args.map,
-        experiments,
-        report_path,
-        notes=notes_value
-    )
+        generate_html_report(
+            map_name,
+            experiments,
+            report_path,
+            notes=notes_value
+        )
+        
+        # Summary
+        print(f"\n{'='*70}")
+        print(f"RESUMEN")
+        print(f"{'='*70}")
+        print(f"Total de experimentos: {len(experiments)}")
+        print(f"Exitosos: {sum(1 for e in experiments if e['success'])}")
+        print(f"Convergieron: {sum(1 for e in experiments if e.get('converged', False))}")
+        print(f"Alcanzaron k-max: {sum(1 for e in experiments if not e.get('converged', False))}")
+        
+        # Count simulation results
+        reached_goal = sum(1 for e in experiments if e.get('stop_reason') == 'reached-goal')
+        if reached_goal > 0:
+            print(f"\n[+] Simulaciones que llegaron a la meta: {reached_goal}/{len(experiments)}")
+        
+        if args.generate_mosaic:
+            mosaic_count = sum(1 for e in experiments if e.get('mosaic_data'))
+            print(f"\n[+] Mosaicos de políticas generados: {mosaic_count}/{len(experiments)}")
+        
+        print(f"\n[+] Informe HTML: {report_path}")
+        print(f"\n[+] Experimentos completados para {map_name}")
     
-    # Summary
     print(f"\n{'='*70}")
-    print(f"RESUMEN")
+    print(f"[✓] Todos los mapas procesados")
     print(f"{'='*70}")
-    print(f"Total de experimentos: {len(experiments)}")
-    print(f"Exitosos: {sum(1 for e in experiments if e['success'])}")
-    print(f"Convergieron: {sum(1 for e in experiments if e.get('converged', False))}")
-    print(f"Alcanzaron k-max: {sum(1 for e in experiments if not e.get('converged', False))}")
-    
-    # Count simulation results
-    reached_goal = sum(1 for e in experiments if e.get('stop_reason') == 'reached-goal')
-    if reached_goal > 0:
-        print(f"\n[+] Simulaciones que llegaron a la meta: {reached_goal}/{len(experiments)}")
-    
-    if args.generate_mosaic:
-        mosaic_count = sum(1 for e in experiments if e.get('mosaic_data'))
-        print(f"\n[+] Mosaicos de políticas generados: {mosaic_count}/{len(experiments)}")
-    
-    print(f"\n[+] Informe HTML: {report_path}")
-    print(f"\n[+] Experimentos completados")
 
 
 if __name__ == "__main__":

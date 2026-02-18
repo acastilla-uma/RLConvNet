@@ -215,6 +215,7 @@ def main():
     parser.add_argument("--reward-min", type=float, default=0)
     parser.add_argument("--reward-max", type=float, default=1)
     parser.add_argument("--goal-reward", type=float, default=5.0, help="Reward at/near goal")
+    parser.add_argument("--goal-radius", type=int, default=1, help="Radius around goal with reward boost")
     args = parser.parse_args()
 
     w, h = args.width, args.height
@@ -237,7 +238,7 @@ def main():
         (args.reward_min, args.reward_max),
         (gx, gy),
         args.goal_reward,
-        1,  # goal_radius fixed to 1
+        args.goal_radius,
     )
 
     # Create descriptive folder with map parameters

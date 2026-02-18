@@ -18,99 +18,17 @@ import base64
 from datetime import datetime
 from html import escape
 from pathlib import Path
+from utils import find_solver_executable, run_train
 
 
-def parse_solver_output(output):
-    """Parse solver output to extract iteration count and convergence status."""
-    iters = None
-    converged = False
-    convergence_message = "Desconocido"
-    
-    # Look for: "RLConvNet simple demo. V(goal)=... iters=500 (converged) tol=0.001"
-    match = re.search(r'iters=(\d+)\s+\((converged|maxed)\)', output)
-    if match:
-        iters = int(match.group(1))
-        converged = (match.group(2) == 'converged')
-    
-    # Extract convergence message
-    if 'Converged at iteration' in output:
-        conv_match = re.search(r'Converged at iteration (\d+) with tol=([0-9.e-]+)', output)
-        if conv_match:
-            convergence_message = f"Convergió en iteración {conv_match.group(1)} (tol={conv_match.group(2)})"
-    elif 'Warning: value iteration hit k-max' in output:
-        warn_match = re.search(r'hit k-max=(\d+) without reaching tol=([0-9.e-]+)', output)
-        if warn_match:
-            convergence_message = f"Alcanzó k-max={warn_match.group(1)} sin llegar a tol={warn_match.group(2)}"
-    
-    return iters, converged, convergence_message
-
-
-def run_train(map_name, tol, k_max, solver_exe="rl_convnet_simple.exe"):
-    """Run training and return results."""
+def run_train_batch(map_name, tol, k_max, solver_exe):
+    """Run training for batch experiments."""
     print(f"\n{'='*70}")
     print(f"Training: tol={tol:.1e}, k-max={k_max}")
     print(f"{'='*70}")
     
-    reward_csv = os.path.join("sim_maps", map_name, "reward.csv")
-    
-    if not os.path.exists(reward_csv):
-        print(f"  ERROR: reward.csv not found: {reward_csv}")
-        return {
-            'tol': tol,
-            'k_max': k_max,
-            'iters': None,
-            'converged': False,
-            'success': False
-        }
-    
-    cmd = [
-        solver_exe,
-        "--reward", reward_csv,
-        "--tol", str(tol),
-        "--k-max", str(k_max)
-    ]
-    
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, encoding='utf-8', errors='ignore')
-        output = result.stdout + result.stderr
-        
-        # Print relevant lines only
-        for line in output.split('\n'):
-            if any(kw in line for kw in ['Policy saved', 'Warning:', 'RLConvNet', 'Converged']):
-                print(f"  {line.strip()}")
-        
-        iters, converged, convergence_msg = parse_solver_output(output)
-        
-        success = iters is not None  # Consider success if we got iterations
-        
-        return {
-            'tol': tol,
-            'k_max': k_max,
-            'iters': iters,
-            'converged': converged,
-            'convergence_message': convergence_msg,
-            'success': success
-        }
-    except subprocess.TimeoutExpired:
-        print(f"  Warning: Training timed out")
-        return {
-            'tol': tol,
-            'k_max': k_max,
-            'iters': None,
-            'converged': False,
-            'convergence_message': 'Timeout de entrenamiento',
-            'success': False
-        }
-    except Exception as e:
-        print(f"  ERROR: {e}")
-        return {
-            'tol': tol,
-            'k_max': k_max,
-            'iters': None,
-            'converged': False,
-            'convergence_message': f'Error: {str(e)}',
-            'success': False
-        }
+    map_folder = os.path.join("sim_maps", map_name)
+    return run_train(map_folder, tol, k_max, solver_exe)
 
 
 def run_simulate(map_name, goal_radius, output_suffix=""):
@@ -209,43 +127,6 @@ def generate_policy_mosaic(map_name):
             return None
     except Exception as e:
         print(f"  ERROR: {e}")
-        return None
-
-
-def generate_policy_mosaic_custom(map_name, output_filename):
-    """Generate policy mosaic visualization with custom filename."""
-    map_path = os.path.join("sim_maps", map_name)
-    policy_path = os.path.join(map_path, "policy.txt")
-    
-    if not os.path.exists(policy_path):
-        print(f"  Warning: Policy not found: {policy_path}")
-        return None
-    
-    # Generate mosaic with default name first
-    cmd = [
-        "python", "viz/plot_policy.py",
-        "--input", policy_path,
-        "--mosaic",
-        "--arrows",
-        "--stride", "5",
-        "--out-dir", map_path
-    ]
-    
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, encoding='utf-8', errors='ignore')
-        
-        default_mosaic = os.path.join(map_path, "policy_argmax_mosaic.png")
-        custom_mosaic = os.path.join(map_path, output_filename)
-        
-        if os.path.exists(default_mosaic):
-            shutil.copy2(default_mosaic, custom_mosaic)
-            print(f"  [+] Saved mosaic: {output_filename}")
-            return custom_mosaic
-        else:
-            print(f"  Warning: Mosaic generation failed")
-            return None
-    except Exception as e:
-        print(f"  ERROR generating mosaic: {e}")
         return None
 
 
@@ -516,25 +397,10 @@ def generate_html_report(map_name, experiments, report_path, notes=None, embed_i
     </table>
 """
     
-    # Add visualizations section
-    html += """
-    <h2>Visualizaciones</h2>
-"""
-
-    def img_src_for(path_value, data_value):
+    def img_src_for(data_value):
         if embed_images and data_value:
             return f"data:image/png;base64,{data_value}"
-        if not path_value or not os.path.exists(path_value):
-            return None
-        if embed_images:
-            try:
-                with open(path_value, "rb") as img_file:
-                    encoded = base64.b64encode(img_file.read()).decode("ascii")
-                return f"data:image/png;base64,{encoded}"
-            except OSError:
-                return None
-        rel_path = os.path.relpath(path_value, os.path.dirname(report_path))
-        return rel_path.replace(os.sep, "/")
+        return None
     
     # Add trajectory plots and mosaics for each experiment
     html += """
@@ -554,7 +420,7 @@ def generate_html_report(map_name, experiments, report_path, notes=None, embed_i
 """
         
         # Add trajectory plot
-        plot_src = img_src_for(exp.get('plot_path'), exp.get('plot_data'))
+        plot_src = img_src_for(exp.get('plot_data'))
         if plot_src:
             html += f"""
                 <div>
@@ -564,7 +430,7 @@ def generate_html_report(map_name, experiments, report_path, notes=None, embed_i
 """
         
         # Add mosaic plot
-        mosaic_src = img_src_for(exp.get('mosaic_path'), exp.get('mosaic_data'))
+        mosaic_src = img_src_for(exp.get('mosaic_data'))
         if mosaic_src:
             html += f"""
                 <div>
@@ -655,6 +521,13 @@ def main():
         default=1,
         help="Goal radius for simulation (default: 1)"
     )
+
+    parser.add_argument(
+        "--solver-exe",
+        type=str,
+        default=None,
+        help="Path to solver executable (auto-detected if not provided)"
+    )
     
     parser.add_argument(
         "--generate-mosaic",
@@ -679,6 +552,13 @@ def main():
     
     args = parser.parse_args()
     
+    # Find solver executable
+    solver_exe = find_solver_executable(args.solver_exe)
+    if not solver_exe:
+        print(f"ERROR: Solver executable not found. Specify with --solver-exe")
+        sys.exit(1)
+    print(f"[*] Using solver: {solver_exe}")
+    
     # Verify map exists
     map_path = os.path.join("sim_maps", args.map)
     if not os.path.isdir(map_path):
@@ -702,7 +582,7 @@ def main():
             exp_num += 1
             
             # Train policy
-            train_result = run_train(args.map, tol, k_max)
+            train_result = run_train_batch(args.map, tol, k_max, solver_exe)
             
             # Simulate policy immediately after training
             sim_result = run_simulate(args.map, args.goal_radius, f" (exp {exp_num})")
@@ -723,27 +603,31 @@ def main():
                     pass
             
             # Generate mosaic for this experiment if requested
-            mosaic_path = None
             mosaic_data = None
             if args.generate_mosaic:
-                mosaic_filename = f"policy_mosaic_tol{tol:.0e}_kmax{k_max}.png"
-                mosaic_path = generate_policy_mosaic_custom(args.map, mosaic_filename)
-                if mosaic_path and os.path.exists(mosaic_path):
-                    try:
-                        with open(mosaic_path, "rb") as img_file:
-                            mosaic_data = base64.b64encode(img_file.read()).decode("ascii")
-                    except OSError as exc:
-                        print(f"  Warning: could not read mosaic image: {exc}")
-                    try:
-                        os.remove(mosaic_path)
-                    except OSError:
-                        pass
-                default_mosaic = os.path.join(map_folder, "policy_argmax_mosaic.png")
-                if os.path.exists(default_mosaic):
-                    try:
-                        os.remove(default_mosaic)
-                    except OSError:
-                        pass
+                mosaic_path = os.path.join(map_folder, "policy_argmax_mosaic.png")
+                cmd = [
+                    "python", "viz/plot_policy.py",
+                    "--input", os.path.join(map_folder, "policy.txt"),
+                    "--mosaic",
+                    "--arrows",
+                    "--stride", "5",
+                    "--out-dir", map_folder
+                ]
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, encoding='utf-8', errors='ignore')
+                    if os.path.exists(mosaic_path):
+                        try:
+                            with open(mosaic_path, "rb") as img_file:
+                                mosaic_data = base64.b64encode(img_file.read()).decode("ascii")
+                        except OSError as exc:
+                            print(f"  Warning: could not read mosaic image: {exc}")
+                        try:
+                            os.remove(mosaic_path)
+                        except OSError:
+                            pass
+                except Exception as e:
+                    print(f"  Warning: mosaic generation failed: {e}")
             
             # Combine results
             experiment = {
@@ -756,9 +640,7 @@ def main():
                 'success': train_result['success'],
                 'stop_reason': sim_result['stop_reason'],
                 'stop_reason_spanish': sim_result['stop_reason_spanish'],
-                'plot_path': None,
                 'plot_data': plot_data,
-                'mosaic_path': None,
                 'mosaic_data': mosaic_data
             }
             experiments.append(experiment)
@@ -801,7 +683,7 @@ def main():
         print(f"\n[+] Simulaciones que llegaron a la meta: {reached_goal}/{len(experiments)}")
     
     if args.generate_mosaic:
-        mosaic_count = sum(1 for e in experiments if e.get('mosaic_path'))
+        mosaic_count = sum(1 for e in experiments if e.get('mosaic_data'))
         print(f"\n[+] Mosaicos de políticas generados: {mosaic_count}/{len(experiments)}")
     
     print(f"\n[+] Informe HTML: {report_path}")

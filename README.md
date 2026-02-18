@@ -1,62 +1,44 @@
 # RL ConvNet: Reinforcement Learning with Spatial Kernels
 
-Un framework de **aprendizaje por refuerzo** que utiliza **kernels convolucionales 3×3** para entrenar políticas en grillas 2D con orientaciones múltiples. El agente aprende a navegar desde un punto de inicio a una meta evitando obstáculos.
+Framework de aprendizaje por refuerzo que entrena políticas en grillas 2D con orientaciones múltiples. El agente aprende a navegar desde inicio a meta evitando obstáculos usando value iteration con kernels 3×3.
 
-**Estado**: ✅ Completamente funcional con pipeline automatizado (Feb 2026)
+**Status**: ✅ Completamente funcional (Feb 2026)
 
 ---
 
-## 🎯 Características Principales
+## 🎯 Características
 
-- **Algoritmo**: Iteración de valores con convergencia adaptativa
-- **Espacio de estados**: Grid 100×100 con hasta 8 orientaciones (configurable)
-- **Espacio de acciones**: 6 acciones posibles/orientación (3 permitidas por defecto)
-- **Núcleo**: Kernels 3×3 para agregación espacial de valores de vecinos
-- **Generación de mapas**: Procedural con obstáculos suavizados y caminos garantizados
-- **Recompensas inteligentes**: Combina seguridad (distancia a obstáculos) + objetivo (atracción a meta)
-- **Simulación**: Argmax determinista o softmax con temperatura configurable
-- **Pipeline completo**: Generación + entrenamiento + simulación en un solo comando
-- **Reproducibilidad**: Nombres de carpetas contienen todos los parámetros
+- Algoritmo: Iteración de valores con convergencia adaptativa
+- Espacios: Grid 100×100 con 8 orientaciones (configurable)
+- Generación de mapas: Procedural con obstáculos suavizados
+- Pipeline completo: Generar + entrenar + simular en un comando
+- Reproducibilidad: Nombres de carpetas contienen todos los parámetros
 
 ---
 
 ## 🚀 Inicio Rápido
 
-### Pipeline Completo en Un Comando
-
+### Setup
 ```bash
 # Compilar solver (solo una vez)
 gcc -O2 rl_convnet_simple.c -o rl_convnet_simple.exe -lm
 
-# Generar mapa + entrenar + simular
-python test_pipeline.py --density 0.4 --seed 42 --start 10,10 --goal 90,90 \
-  --tol 1e-3 --k-max 5000 --action all --goal-radius 1
+# Generar mapa + entrenar + simular (todo en uno)
+python test_pipeline.py --density 0.4 --seed 42 --tol 1e-3 --k-max 5000 --action all
 ```
 
-**¿Qué hace esto?**
-1. Genera mapa en `sim_maps/map_d0.4_s42_sm3_cr2/`
-2. Entrena política usando value iteration
-3. Simula trayectoria y guarda `policy_path.png` en carpeta del mapa
+**Resultado**: Mapa en `sim_maps/map_d0.4_s42_sm3_cr2/` con política entrenada y trayectoria simulada.
 
-**Resultado esperado:**
-```
-============================================================
-Generating map: density=0.4, seed=42, start=10,10, goal=90,90
-============================================================
-  ✓ Generated: map_d0.4_s42_sm3_cr2
+### Trabajar con Mapas Existentes
+```bash
+# Entrenar en mapa existente
+python test_pipeline.py --action train --map map_d0.4_s42_sm3_cr2 --tol 1e-3 --k-max 5000
 
-============================================================
-Training on generated map
-============================================================
-🔧 Training policy...
-  Policy saved to: policy.txt and sim_maps/map_d0.4_s42_sm3_cr2/policy.txt
+# Simular en mapa existente
+python test_pipeline.py --action simulate --map map_d0.4_s42_sm3_cr2
 
-🎮 Simulating policy...
-  Auto-detected policy from: sim_maps\map_d0.4_s42_sm3_cr2\policy.txt
-  Saved rollout plot to sim_maps\map_d0.4_s42_sm3_cr2\policy_path.png
-  Simulation stop reason: reached-goal
-
-✅ Pipeline complete!
+# Listar mapas disponibles
+python test_pipeline.py --action list
 ```
 
 ---
@@ -65,36 +47,26 @@ Training on generated map
 
 ```
 RISCVsummit/
-├── README.md                        ← Este archivo (inicio rápido)
-├── README_TESTING.md                ← Guía completa (todos los parámetros)
-├── RESTRUCTURING_SUMMARY.md         ← Cambios recientes
+├── README.md                    ← Este archivo
+├── rl_convnet_simple.c          ← Solver (value iteration en C)
+├── rl_convnet_simple.exe        ← Ejecutable compilado
 │
-├── rl_convnet_simple.c              ← Solver (value iteration en C)
-├── rl_convnet_simple.exe            ← Ejecutable compilado
+├── sim/
+│   ├── map_generator.py         ← Generador de mapas
+│   └── map_visualize.py         ← Visualización de mapas
 │
-├── sim/                             ← Generación de mapas
-│   ├── map_generator.py             ← Crea mapas → carpetas auto-nombradas
-│   └── map_visualize.py             ← Visualiza mapas
+├── sim_maps/                    ← Base de datos de mapas
+│   ├── map_d0.1_s55_sm1_cr1/   ← Móvil (10% obstáculos)
+│   ├── map_d0.35_s42_sm3_cr2/  ← Estándar
+│   └── map_d0.5_s100_sm4_cr1/  ← Difícil (50% obstáculos)
 │
-├── sim_maps/                        ← Base de datos de mapas
-│   ├── map_d0.1_s55_sm1_cr1/        ← Móvil (10% obstáculos)
-│   │   ├── obstacles.csv
-│   │   ├── reward.csv
-│   │   ├── start_goal.csv
-│   │   └── obstacles.png            ← Auto-generado
-│   │
-│   ├── map_d0.35_s42_sm3_cr2/       ← Estándar (35% obstáculos)
-│   │   └── ... (ídem)
-│   │
-│   └── map_d0.5_s100_sm4_cr1/       ← Difícil (50% obstáculos)
-│       └── ... (ídem)
+├── viz/
+│   ├── plot_policy.py           ← Visualización y simulación
+│   └── policy_plots/            ← Gráficos generados
 │
-├── viz/                             ← Visualización de políticas
-│   ├── plot_policy.py               ← Policy plotting + simulation
-│   └── policy_plots/                ← Gráficos generados
-│
-├── policy.txt                       ← Política entrenada
-└── test_pipeline.py                 ← Automatización train+simulate
+├── test_pipeline.py             ← Automatización train+simulate
+├── batch_experiments.py         ← Experimentos en batch
+└── utils.py                     ← Funciones compartidas
 ```
 
 ---

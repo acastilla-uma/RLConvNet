@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from utils import find_solver_executable, run_train
 
 
 def list_available_maps(maps_dir="sim_maps"):
@@ -72,42 +73,16 @@ def generate_map(
         return None
 
 
-def train_policy(map_folder, solver_exe="rl_convnet_simple.exe", tol=1e-4, k_max=50000):
+def train_policy(map_folder, solver_exe=None, tol=1e-4, k_max=50000):
     """Train policy for a map using the solver."""
-    reward_csv = os.path.join(map_folder, "reward.csv")
+    if solver_exe is None:
+        solver_exe = find_solver_executable()
     
-    if not os.path.exists(reward_csv):
-        print(f"  ❌ reward.csv not found in {map_folder}")
+    if not solver_exe:
+        print(f"  ❌ Solver executable not found")
         return None
     
-    if not os.path.exists(solver_exe):
-        print(f"  ❌ Solver executable not found: {solver_exe}")
-        return None
-    
-    cmd = [
-        solver_exe,
-        "--reward", reward_csv,
-        "--tol", str(tol),
-        "--k-max", str(k_max)
-    ]
-    
-    print(f"  Running solver...")
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        
-        output = result.stdout + result.stderr
-        # Extract important lines
-        for line in output.split('\n'):
-            if 'Converged at' in line or 'Warning:' in line or 'saved to' in line:
-                print(f"  {line.strip()}")
-        
-        return True
-    except subprocess.TimeoutExpired:
-        print(f"  ❌ Solver timed out (>300s)")
-        return None
-    except Exception as e:
-        print(f"  ❌ Error running solver: {e}")
-        return None
+    return run_train(map_folder, tol, k_max, solver_exe)
 
 
 def simulate_policy(map_folder, steps=10000, action_mode="argmax", temperature=1.0, goal_radius=0):
@@ -245,6 +220,13 @@ def main():
         help="Goal radius for simulation stop condition"
     )
     
+    parser.add_argument(
+        "--solver-exe",
+        type=str,
+        default=None,
+        help="Path to solver executable (auto-detected if not provided)"
+    )
+    
     # Batch processing
     parser.add_argument(
         "--all-maps",
@@ -253,6 +235,14 @@ def main():
     )
     
     args = parser.parse_args()
+    
+    # Find solver executable
+    solver_exe = find_solver_executable(args.solver_exe)
+    if not solver_exe:
+        print(f"WARNING: Solver executable not found. Training will fail.")
+        solver_exe = None  # Will auto-detect when needed
+    else:
+        print(f"[*] Using solver: {solver_exe}")
 
     # If generating new map
     if args.density is not None or args.seed is not None:
@@ -286,7 +276,7 @@ def main():
         print(f"{'='*60}")
         
         print("[*] Training policy...")
-        train_policy(map_path, tol=args.tol, k_max=args.k_max)
+        train_policy(map_path, solver_exe=solver_exe, tol=args.tol, k_max=args.k_max)
         
         print("\n[*] Simulating policy...")
         simulate_policy(
@@ -345,7 +335,7 @@ def main():
 
         if args.action in ("train", "all"):
             print("[*] Training policy...")
-            train_policy(map_path, tol=args.tol, k_max=args.k_max)
+            train_policy(map_path, solver_exe=solver_exe, tol=args.tol, k_max=args.k_max)
 
         if args.action in ("simulate", "all"):
             print("[*] Simulating policy...")

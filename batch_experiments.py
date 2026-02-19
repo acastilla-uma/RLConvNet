@@ -658,9 +658,11 @@ def main():
                 mosaic_data = None
                 if args.generate_mosaic:
                     mosaic_path = os.path.join(map_folder, "policy_argmax_mosaic.png")
+                    reward_path = os.path.join(map_folder, "reward.csv")
                     cmd = [
                         "python", "viz/plot_policy.py",
                         "--input", os.path.join(map_folder, "policy.txt"),
+                        "--reward", reward_path,
                         "--mosaic",
                         "--arrows",
                         "--stride", "5",

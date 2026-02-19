@@ -279,7 +279,7 @@ def plot_argmax_with_arrows(actions, title, vectors, orient, stride, save_path=N
     plt.close()
 
 
-def plot_argmax_mosaic(actions_list, title, vectors, stride, show_arrows, save_path=None, show=False):
+def plot_argmax_mosaic(actions_list, title, vectors, stride, show_arrows, reward=None, obstacle_threshold=-0.5, save_path=None, show=False):
     count = len(actions_list)
     cols = int(np.ceil(np.sqrt(count)))
     rows = int(np.ceil(count / cols))
@@ -295,7 +295,15 @@ def plot_argmax_mosaic(actions_list, title, vectors, stride, show_arrows, save_p
         c = idx % cols
         ax = axes[r, c]
         dir_idx = actions_to_dir(actions, vectors, idx)
-        im = ax.imshow(dir_idx, cmap=cmap, origin="lower", vmin=0, vmax=7, interpolation="nearest")
+        
+        # Mask obstacles (show as black)
+        if reward is not None:
+            obstacle_mask = reward <= obstacle_threshold
+            dir_idx_masked = np.ma.masked_where(obstacle_mask, dir_idx)
+            im = ax.imshow(dir_idx_masked, cmap=cmap, origin="lower", vmin=0, vmax=7, interpolation="nearest")
+        else:
+            im = ax.imshow(dir_idx, cmap=cmap, origin="lower", vmin=0, vmax=7, interpolation="nearest")
+        
         if show_arrows:
             overlay_arrows(ax, actions, vectors[idx], stride=stride)
         ax.set_title(f"orient={orientation_label(idx)}")
@@ -620,8 +628,16 @@ def main():
             print("No orientations found for mosaic")
             return 1
 
+        # Load reward to mask obstacles
+        reward = None
+        if os.path.exists(args.reward):
+            try:
+                reward = load_reward_csv(args.reward)
+            except Exception as e:
+                print(f"Warning: Could not load reward for obstacle masking: {e}")
+        
         out_path = os.path.join(args.out_dir, "policy_argmax_mosaic.png")
-        plot_argmax_mosaic(actions_list, "policy argmax mosaic", vectors, args.stride, args.arrows, save_path=out_path, show=args.show)
+        plot_argmax_mosaic(actions_list, "policy argmax mosaic", vectors, args.stride, args.arrows, reward=reward, save_path=out_path, show=args.show)
         print(f"Saved mosaic plot to {out_path}")
         return 0
 

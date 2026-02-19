@@ -6,6 +6,315 @@ Framework de aprendizaje por refuerzo que entrena políticas en grillas 2D con o
 
 ---
 
+## 🔄 Workflow del Sistema
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    PIPELINE COMPLETO                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. GENERACIÓN DE MAPA (map_generator.py)                      │
+│     Entrada: --density, --seed, --smooth, --carve              │
+│             --start, --goal, --goal-reward                     │
+│     Salida:  sim_maps/map_dX_sY_smZ_crW/                       │
+│             ├── obstacles.csv      (grid binario 0/1)          │
+│             ├── obstacles.png      (visualización)             │
+│             ├── reward.csv         (recompensas por celda)     │
+│             └── start_goal.csv     (sx,sy,gx,gy)               │
+│                                                                 │
+│  2. ENTRENAMIENTO (rl_convnet_simple.exe)                      │
+│     Entrada: reward.csv, --tol, --k-max                        │
+│     Proceso: Value iteration con kernels 3×3                   │
+│     Salida:  policy.txt            (Q-values 8×6×100×100)      │
+│     Métricas: Iteraciones, convergencia, V(goal)               │
+│                                                                 │
+│  3. SIMULACIÓN (viz/plot_policy.py)                            │
+│     Entrada: policy.txt, reward.csv, start_goal.csv            │
+│             --action-mode, --goal-radius                       │
+│     Proceso: Rollout desde inicio hasta:                       │
+│             • Alcanza objetivo                                 │
+│             • Choca con obstáculo                              │
+│             • Detecta ciclo                                    │
+│             • Alcanza max pasos                                │
+│     Salida:  policy_path.png       (trayectoria visualizada)   │
+│                                                                 │
+│  4. BATCH EXPERIMENTS (batch_experiments.py)                   │
+│     Entrada: --map, --k-max (lista), --tol (lista)            │
+│     Proceso: Entrena múltiples configuraciones                 │
+│     Salida:  map_XXX.html          (reporte interactivo)       │
+│             • Tabla comparativa de experimentos                │
+│             • Trayectorias visualizadas embebidas              │
+│             • Mosaicos de políticas (opcional)                 │
+│             • Notas editables persistentes                     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Componentes del Sistema
+
+#### 📁 **map_generator.py** - Generador de Mapas
+**Función:** Crea entornos de navegación 2D procedurales con obstáculos
+
+**Entrada:**
+- `density`: Porcentaje de obstáculos (0.0-1.0)
+- `seed`: Semilla aleatoria para reproducibilidad
+- `smooth`: Pasadas de suavizado para blobs coherentes
+- `carve`: Radio para garantizar corredor libre inicio→meta
+- `start/goal`: Posiciones inicial y objetivo (x,y)
+- `goal-reward`: Recompensa alta en región del objetivo
+
+**Salida:**
+- `obstacles.csv`: Matriz 100×100 de 0 (libre) / 1 (obstáculo)
+- `reward.csv`: Matriz 100×100 de valores flotantes:
+  - Celdas con obstáculos: penalización negativa
+  - Celdas libres: interpolación lineal según distancia a obstáculos
+  - Región objetivo: boost alto para atraer política
+- `start_goal.csv`: Una línea con `sx,sy,gx,gy`
+- `obstacles.png`: Visualización con inicio (●) y meta (★)
+
+**Algoritmo:**
+1. Genera ruido aleatorio binario con `density`
+2. Aplica `smooth` iteraciones de suavizado por conteo de vecinos
+3. Dibuja corredor garantizado con radio `carve` usando A*
+4. Construye mapa de recompensas híbrido (obstáculos + objetivo)
+
+---
+
+#### ⚙️ **rl_convnet_simple.c** - Solver de Value Iteration
+**Función:** Entrena política óptima usando iteración de valores con kernels espaciales
+
+**Entrada:**
+- `reward.csv`: Mapa de recompensas (requerido)
+- `--tol`: Tolerancia de convergencia (default: 1e-4)
+- `--k-max`: Máximo de iteraciones (default: 1000)
+- `--n-orient`: Orientaciones 1-8 (default: 8)
+- `--n-actions`: Acciones por orientación 1-6 (default: 6)
+
+**Salida:**
+- `policy.txt`: Archivo de ~6MB con estructura:
+  ```
+  # iters=<N>
+  <orient> <action> <y> <x> <Q-value>
+  ```
+  Contiene Q(s,a) para cada estado-acción
+
+**Algoritmo (Value Iteration con Kernels):**
+1. **Inicialización**: V(s) ← 0 para todos los estados
+2. **Para cada iteración t hasta k-max:**
+   - **Aggregation**: Para cada orientación y acción:
+     ```
+     aggregate[o,a,y,x] = Σ kernel[o,a,dy,dx] * V[y+dy, x+dx]
+     ```
+   - **Backup**: 
+     ```
+     Q[o,a,y,x] = reward[y,x] + γ * aggregate[o,a,y,x]
+     V_new[o,y,x] = max_a Q[o,a,y,x]
+     ```
+   - **Convergencia**:
+     ```
+     delta = max_s |V_new[s] - V[s]|
+     if delta < tol: CONVERGED
+     ```
+3. **Política**: Softmax sobre Q-values
+
+**Kernels 3×3:** Definen transición espacial por acción:
+- Acción 0 (avanzar): Mueve en dirección de orientación
+- Acción 1/2 (girar): Rota ±45°
+- Cada kernel codifica probabilidad de alcanzar celdas vecinas
+
+**Características:**
+- Convergencia adaptativa: Para cuando mejora < tol
+- Timeout: Para si alcanza k-max iteraciones
+- Métricas: Reporta V(goal), iteraciones, estado de convergencia
+
+---
+
+#### 📊 **plot_policy.py** - Visualización y Simulación
+**Función:** Genera trayectorias simuladas y mosaicos de políticas
+
+**Modos de Operación:**
+
+**1. Simulación de Trayectoria** (`--simulate`)
+- **Entrada:**
+  - `policy.txt`: Política entrenada
+  - `reward.csv`: Para detectar obstáculos
+  - `start_goal.csv`: Auto-detecta inicio/meta
+  - `--action-mode`: `argmax` (greedy) o `softmax` (estocástico)
+  - `--goal-radius`: Tolerancia de llegada (0=exacto)
+  - `--steps`: Máximo de pasos (default: 10000)
+
+- **Proceso:**
+  1. Comienza en `(start_x, start_y, orient=0)`
+  2. En cada paso:
+     - Lee Q-values de estado actual
+     - Selecciona acción según `action-mode`
+     - Aplica transición usando kernels
+     - Detecta condiciones de parada
+  3. Para cuando:
+     - `reached-goal`: Distancia al objetivo ≤ goal-radius
+     - `hit-obstacle`: Entra en celda con obstáculo
+     - `cycle`: Revisita estado (pos + orient)
+     - `max-steps`: Agota límite de pasos
+
+- **Salida:**
+  - `policy_path.png`: Trayectoria sobre mapa de obstáculos
+    - Línea azul: Camino seguido
+    - Punto verde: Inicio
+    - Estrella roja: Objetivo
+    - Título con razón de parada
+
+**2. Mosaico de Políticas** (`--mosaic`)
+- **Entrada:**
+  - `policy.txt`: Política entrenada
+  - `--arrows`: Superpone flechas direccionales
+  - `--stride`: Muestreo de flechas (default: 5)
+  
+- **Salida:**
+  - `policy_argmax_mosaic.png`: Heatmap de V(s) con flechas
+    - Color: Valor de estado (azul=bajo, rojo=alto)
+    - Flechas: Acción óptima por orientación
+
+**Características:**
+- **Auto-detección**: Busca `policy.txt` en carpeta del mapa
+- **Flexibilidad**: Soporta grillas de cualquier tamaño
+- **Debugging**: `--print-table` para ver mapeo de acciones
+
+---
+
+#### 🔬 **batch_experiments.py** - Experimentos en Batch
+**Función:** Ejecuta múltiples configuraciones de entrenamiento y genera reporte HTML interactivo
+
+**Entrada:**
+- `--map`: Mapa existente o `--all-maps` para procesar todos
+- `--k-max`: Lista de valores (ej: 50 100 1000 5000)
+- `--tol`: Lista de tolerancias (ej: 1e-2 1e-3 1e-4)
+- `--generate-mosaic`: Flag para incluir mosaicos de políticas
+- `--goal-radius`: Radio de tolerancia para simulaciones
+
+**Proceso:**
+1. **Por cada combinación (map, tol, k-max):**
+   - Ejecuta `rl_convnet_simple.exe` con parámetros
+   - Captura métricas: iteraciones, convergencia, V(goal)
+   - Simula trayectoria con `plot_policy.py`
+   - Embebe imagen como base64 en memoria
+   - (Opcional) Genera mosaic de política
+   - Elimina archivos temporales
+
+2. **Genera reporte HTML:**
+   - Tabla comparativa de todos los experimentos
+   - Visualizaciones embebidas (no archivos externos)
+   - Sistema de notas persistentes (JavaScript)
+   - Diseño responsive con CSS moderno
+
+**Salida:**
+- `sim_maps/<map>/<map>.html`: Reporte completo
+  - **Tabla de experimentos:** tol, k-max, iters, convergencia
+  - **Sección por experimento:**
+    - Trayectoria simulada (siempre)
+    - Mosaico de políticas (si --generate-mosaic)
+    - Razón de detención de simulación
+  - **Notas editables:** Se guardan en HTML descargado
+
+**Características Especiales:**
+- **Imágenes embebidas**: Todo en un archivo HTML portátil
+- **Notas persistentes**: JavaScript permite añadir comentarios
+  - Guarda modificaciones descargando nuevo HTML
+  - Notas viajan con el reporte
+- **Diseño profesional**: CSS con colores y layouts limpios
+- **Auto-detección de solver**: Busca ejecutable automáticamente
+
+**Ejemplo de uso completo:**
+```bash
+# Batch con 4 configuraciones + mosaicos
+python batch_experiments.py \
+  --map map_d0.7_s42_sm3_cr2 \
+  --k-max 50 100 1000 5000 \
+  --tol 1e-3 \
+  --generate-mosaic \
+  --goal-radius 1
+```
+
+---
+
+#### 🚀 **test_pipeline.py** - Automatización del Pipeline
+**Función:** Orquesta generación → entrenamiento → simulación en un solo comando
+
+**Entrada:**
+- `--action`:
+  - `list`: Lista mapas disponibles
+  - `train`: Solo entrenar en mapa existente
+  - `simulate`: Solo simular en mapa existente
+  - `all`: Pipeline completo
+- `--map`: Especifica mapa existente (o genera nuevo con --density/--seed)
+- `--all-maps`: Procesa todos los mapas en batch
+
+**Proceso según acción:**
+
+**`--action list`:**
+- Escanea `sim_maps/`
+- Muestra mapas con detalles (densidad, seed, etc.)
+
+**`--action train`:**
+1. Valida existencia de `reward.csv` en mapa
+2. Auto-detecta solver ejecutable
+3. Ejecuta `rl_convnet_simple.exe` con parámetros
+4. Reporta métricas de convergencia
+
+**`--action simulate`:**
+1. Valida existencia de `policy.txt` en mapa
+2. Ejecuta `plot_policy.py --simulate`
+3. Genera `policy_path.png`
+
+**`--action all`:**
+1. Si `--density` y `--seed`: Genera nuevo mapa
+2. Entrena política en mapa
+3. Simula trayectoria
+4. Reporta resumen completo
+
+**Características:**
+- **Auto-detección**: Encuentra solver y archivos necesarios
+- **Manejo de errores**: Valida existencia de archivos antes de ejecutar
+- **Batch processing**: `--all-maps` itera sobre todos
+- **Timeouts**: Previene bloqueo en simulaciones largas
+- **Parseo de salida**: Extrae métricas de stdout del solver
+
+**Ejemplo workflow completo:**
+```bash
+# Generar mapa nuevo + entrenar + simular
+python test_pipeline.py \
+  --density 0.5 --seed 999 \
+  --tol 1e-4 --k-max 10000 \
+  --goal-radius 2 \
+  --action all
+```
+
+---
+
+### Flujo de Datos Entre Componentes
+
+```
+map_generator.py
+    │
+    ├─→ obstacles.csv ──┐
+    ├─→ obstacles.png   │
+    ├─→ reward.csv ─────┼─→ rl_convnet_simple.exe
+    └─→ start_goal.csv ─┤        │
+                        │        ├─→ policy.txt ──┐
+                        │        │                │
+                        └────────┼────────────────┼─→ plot_policy.py
+                                 │                │        │
+                                 └────────────────┘        ├─→ policy_path.png
+                                                           └─→ policy_argmax_mosaic.png
+                                                                      │
+                                                                      ↓
+                                                           batch_experiments.py
+                                                                      │
+                                                                      └─→ map_XXX.html
+                                                                          (reporte completo)
+```
+
+---
+
 ## 🎯 Características
 
 - Algoritmo: Iteración de valores con convergencia adaptativa
